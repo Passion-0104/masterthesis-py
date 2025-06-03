@@ -1,0 +1,97 @@
+# Virtual environment files
+myvenv/
+.venv/
+venv/
+env/
+ENV/
+.ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Configuration files
+*.cfg
+!requirements.txt
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Data files (optional, adjust as needed)
+*.xlsx
+*.xls
+*.csv
+!sample_data.*
+
+# Generated charts
+*.png
+*.pdf
+*.svg
+!docs/images/
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+
+# Application specific
+h2o_calibration_recent_pairs.json 
