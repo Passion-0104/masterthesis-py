@@ -85,17 +85,17 @@ class MainWindow(QMainWindow):
     def create_file_section(self, parent_layout):
         """Create file selection section"""
         file_group = QGroupBox("File Selection")
-        file_group.setFont(QFont("Arial", 16))  # Main text size
+        file_group.setFont(QFont("Arial", 12))  # Academic standard size
         file_layout = QHBoxLayout(file_group)
         file_layout.setSpacing(10)
         file_layout.setContentsMargins(10, 10, 10, 10)
         
         self.file_button = QPushButton("Select Excel File")
-        self.file_button.setFont(QFont("Arial", 16))
-        self.file_button.setMinimumHeight(40)
+        self.file_button.setFont(QFont("Arial", 11))
+        self.file_button.setMinimumHeight(32)
         
         self.file_label = QLabel("No file selected")
-        self.file_label.setFont(QFont("Arial", 16))
+        self.file_label.setFont(QFont("Arial", 11))
         
         file_layout.addWidget(self.file_button)
         file_layout.addWidget(self.file_label, 1)
@@ -105,14 +105,14 @@ class MainWindow(QMainWindow):
     def create_column_section(self, parent_layout):
         """Create column selection section"""
         column_group = QGroupBox("Column Selection")
-        column_group.setFont(QFont("Arial", 16))
+        column_group.setFont(QFont("Arial", 12))
         column_layout = QVBoxLayout(column_group)
         column_layout.setSpacing(8)
         column_layout.setContentsMargins(10, 10, 10, 10)
         
         # Instructions
         instructions = QLabel("Select Columns to Plot (Ctrl+Click for multiple selection):")
-        instructions.setFont(QFont("Arial", 14))  # Slightly smaller for instructions
+        instructions.setFont(QFont("Arial", 10))  # Smaller instruction text
         column_layout.addWidget(instructions)
         
         # Buttons row
@@ -120,12 +120,12 @@ class MainWindow(QMainWindow):
         button_row.setSpacing(10)
         
         self.clear_selection_btn = QPushButton("Clear Selection")
-        self.clear_selection_btn.setFont(QFont("Arial", 14))
-        self.clear_selection_btn.setMinimumHeight(35)
+        self.clear_selection_btn.setFont(QFont("Arial", 10))
+        self.clear_selection_btn.setMinimumHeight(28)
         
         self.auto_match_btn = QPushButton("Auto-Match Pairs")
-        self.auto_match_btn.setFont(QFont("Arial", 14))
-        self.auto_match_btn.setMinimumHeight(35)
+        self.auto_match_btn.setFont(QFont("Arial", 10))
+        self.auto_match_btn.setMinimumHeight(28)
         
         button_row.addWidget(self.clear_selection_btn)
         button_row.addWidget(self.auto_match_btn)
@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
         
         # Column list
         self.column_list = QListWidget()
-        self.column_list.setFont(QFont("Arial", 14))
+        self.column_list.setFont(QFont("Arial", 10))
         self.column_list.setSelectionMode(QAbstractItemView.MultiSelection)
         self.column_list.setMinimumHeight(150)
         column_layout.addWidget(self.column_list)
@@ -144,7 +144,7 @@ class MainWindow(QMainWindow):
     def create_time_section(self, parent_layout):
         """Create time settings section"""
         time_group = QGroupBox("Time Settings")
-        time_group.setFont(QFont("Arial", 16))
+        time_group.setFont(QFont("Arial", 12))
         time_layout = QVBoxLayout(time_group)
         time_layout.setSpacing(8)
         time_layout.setContentsMargins(10, 10, 10, 10)
@@ -154,29 +154,29 @@ class MainWindow(QMainWindow):
         time_col_layout.setSpacing(10)
         
         time_label = QLabel("Time Column:")
-        time_label.setFont(QFont("Arial", 16))
+        time_label.setFont(QFont("Arial", 11))
         time_col_layout.addWidget(time_label)
         
         self.time_column_combo = QComboBox()
-        self.time_column_combo.setFont(QFont("Arial", 14))
-        self.time_column_combo.setMinimumHeight(35)
+        self.time_column_combo.setFont(QFont("Arial", 10))
+        self.time_column_combo.setMinimumHeight(28)
         time_col_layout.addWidget(self.time_column_combo, 1)
         
         time_layout.addLayout(time_col_layout)
         
         # Time range settings
         range_label = QLabel("Time Range:")
-        range_label.setFont(QFont("Arial", 16))
+        range_label.setFont(QFont("Arial", 11))
         time_layout.addWidget(range_label)
         
         self.time_range_group = QButtonGroup()
         
         self.radio_all = QRadioButton("Show All Data")
-        self.radio_all.setFont(QFont("Arial", 14))
+        self.radio_all.setFont(QFont("Arial", 10))
         self.radio_2hours = QRadioButton("First 2 Hours Only")
-        self.radio_2hours.setFont(QFont("Arial", 14))
+        self.radio_2hours.setFont(QFont("Arial", 10))
         self.radio_custom = QRadioButton("Custom Range")
-        self.radio_custom.setFont(QFont("Arial", 14))
+        self.radio_custom.setFont(QFont("Arial", 10))
         
         self.radio_2hours.setChecked(True)  # Default
         
@@ -193,25 +193,25 @@ class MainWindow(QMainWindow):
         custom_layout.setSpacing(10)
         
         start_label = QLabel("Start Time (h):")
-        start_label.setFont(QFont("Arial", 16))
+        start_label.setFont(QFont("Arial", 11))
         custom_layout.addWidget(start_label)
         
         self.start_time_spin = QDoubleSpinBox()
-        self.start_time_spin.setFont(QFont("Arial", 14))
+        self.start_time_spin.setFont(QFont("Arial", 10))
         self.start_time_spin.setRange(0, 100)
         self.start_time_spin.setValue(0.0)
-        self.start_time_spin.setMinimumHeight(35)
+        self.start_time_spin.setMinimumHeight(28)
         custom_layout.addWidget(self.start_time_spin)
         
         end_label = QLabel("End Time (h):")
-        end_label.setFont(QFont("Arial", 16))
+        end_label.setFont(QFont("Arial", 11))
         custom_layout.addWidget(end_label)
         
         self.end_time_spin = QDoubleSpinBox()
-        self.end_time_spin.setFont(QFont("Arial", 14))
+        self.end_time_spin.setFont(QFont("Arial", 10))
         self.end_time_spin.setRange(0, 100)
         self.end_time_spin.setValue(2.0)
-        self.end_time_spin.setMinimumHeight(35)
+        self.end_time_spin.setMinimumHeight(28)
         custom_layout.addWidget(self.end_time_spin)
         
         time_layout.addLayout(custom_layout)
@@ -220,7 +220,7 @@ class MainWindow(QMainWindow):
     def create_calibration_section(self, parent_layout):
         """Create calibration settings section"""
         calib_group = QGroupBox("Moisture Calibration Settings")
-        calib_group.setFont(QFont("Arial", 16))
+        calib_group.setFont(QFont("Arial", 12))
         calib_layout = QVBoxLayout(calib_group)
         calib_layout.setSpacing(8)
         calib_layout.setContentsMargins(10, 10, 10, 10)
@@ -230,19 +230,19 @@ class MainWindow(QMainWindow):
         calib_options_layout.setSpacing(5)
         
         self.enable_calibration_cb = QCheckBox("Enable Moisture Calibration")
-        self.enable_calibration_cb.setFont(QFont("Arial", 16))
+        self.enable_calibration_cb.setFont(QFont("Arial", 11))
         calib_options_layout.addWidget(self.enable_calibration_cb)
         
         options_row = QHBoxLayout()
         options_row.setSpacing(15)
         
         self.show_original_cb = QCheckBox("Show Original Data")
-        self.show_original_cb.setFont(QFont("Arial", 14))
+        self.show_original_cb.setFont(QFont("Arial", 10))
         self.show_original_cb.setChecked(True)
         options_row.addWidget(self.show_original_cb)
         
         self.show_error_cb = QCheckBox("Show Error Range")
-        self.show_error_cb.setFont(QFont("Arial", 14))
+        self.show_error_cb.setFont(QFont("Arial", 10))
         options_row.addWidget(self.show_error_cb)
         
         calib_options_layout.addLayout(options_row)
@@ -252,14 +252,14 @@ class MainWindow(QMainWindow):
         error_layout.setSpacing(10)
         
         error_label = QLabel("Error Value (ppm):")
-        error_label.setFont(QFont("Arial", 16))
+        error_label.setFont(QFont("Arial", 11))
         error_layout.addWidget(error_label)
         
         self.error_value_spin = QDoubleSpinBox()
-        self.error_value_spin.setFont(QFont("Arial", 14))
+        self.error_value_spin.setFont(QFont("Arial", 10))
         self.error_value_spin.setRange(0, 100)
         self.error_value_spin.setValue(10.0)
-        self.error_value_spin.setMinimumHeight(35)
+        self.error_value_spin.setMinimumHeight(28)
         error_layout.addWidget(self.error_value_spin)
         error_layout.addStretch()
         
@@ -268,7 +268,7 @@ class MainWindow(QMainWindow):
         
         # Calibration parameters
         param_label = QLabel("Calibration Parameters:")
-        param_label.setFont(QFont("Arial", 16))
+        param_label.setFont(QFont("Arial", 11))
         calib_layout.addWidget(param_label)
         
         param_grid = QGridLayout()
@@ -276,41 +276,41 @@ class MainWindow(QMainWindow):
         
         # f1 parameter
         f1_label = QLabel("f1:")
-        f1_label.setFont(QFont("Arial", 16))
+        f1_label.setFont(QFont("Arial", 11))
         param_grid.addWidget(f1_label, 0, 0)
         
         self.f1_spin = QDoubleSpinBox()
-        self.f1_spin.setFont(QFont("Arial", 14))
+        self.f1_spin.setFont(QFont("Arial", 10))
         self.f1_spin.setDecimals(6)
         self.f1_spin.setRange(-10, 10)
         self.f1_spin.setValue(0.196798)
-        self.f1_spin.setMinimumHeight(35)
+        self.f1_spin.setMinimumHeight(28)
         param_grid.addWidget(self.f1_spin, 0, 1)
         
         # f2 parameter
         f2_label = QLabel("f2:")
-        f2_label.setFont(QFont("Arial", 16))
+        f2_label.setFont(QFont("Arial", 11))
         param_grid.addWidget(f2_label, 1, 0)
         
         self.f2_spin = QDoubleSpinBox()
-        self.f2_spin.setFont(QFont("Arial", 14))
+        self.f2_spin.setFont(QFont("Arial", 10))
         self.f2_spin.setDecimals(6)
         self.f2_spin.setRange(-10, 10)
         self.f2_spin.setValue(0.419073)
-        self.f2_spin.setMinimumHeight(35)
+        self.f2_spin.setMinimumHeight(28)
         param_grid.addWidget(self.f2_spin, 1, 1)
         
         # p_ref parameter
         p_ref_label = QLabel("p_ref:")
-        p_ref_label.setFont(QFont("Arial", 16))
+        p_ref_label.setFont(QFont("Arial", 11))
         param_grid.addWidget(p_ref_label, 2, 0)
         
         self.p_ref_spin = QDoubleSpinBox()
-        self.p_ref_spin.setFont(QFont("Arial", 14))
+        self.p_ref_spin.setFont(QFont("Arial", 10))
         self.p_ref_spin.setDecimals(2)
         self.p_ref_spin.setRange(0.1, 10.0)
         self.p_ref_spin.setValue(1.0)
-        self.p_ref_spin.setMinimumHeight(35)
+        self.p_ref_spin.setMinimumHeight(28)
         param_grid.addWidget(self.p_ref_spin, 2, 1)
         
         calib_layout.addLayout(param_grid)
@@ -320,20 +320,20 @@ class MainWindow(QMainWindow):
         param_btn_layout.setSpacing(10)
         
         self.import_params_btn = QPushButton("Import Parameters")
-        self.import_params_btn.setFont(QFont("Arial", 14))
-        self.import_params_btn.setMinimumHeight(35)
+        self.import_params_btn.setFont(QFont("Arial", 10))
+        self.import_params_btn.setMinimumHeight(28)
         param_btn_layout.addWidget(self.import_params_btn)
         
         self.export_params_btn = QPushButton("Export Parameters")
-        self.export_params_btn.setFont(QFont("Arial", 14))
-        self.export_params_btn.setMinimumHeight(35)
+        self.export_params_btn.setFont(QFont("Arial", 10))
+        self.export_params_btn.setMinimumHeight(28)
         param_btn_layout.addWidget(self.export_params_btn)
         
         calib_layout.addLayout(param_btn_layout)
         
         # Moisture-Pressure pairs
         pairs_group = QGroupBox("Moisture-Pressure Pairs")
-        pairs_group.setFont(QFont("Arial", 16))
+        pairs_group.setFont(QFont("Arial", 12))
         pairs_layout = QVBoxLayout(pairs_group)
         pairs_layout.setSpacing(8)
         pairs_layout.setContentsMargins(10, 10, 10, 10)
@@ -343,18 +343,18 @@ class MainWindow(QMainWindow):
         pairs_btn_layout.setSpacing(10)
         
         self.clear_pairs_btn = QPushButton("Clear All Pairs")
-        self.clear_pairs_btn.setFont(QFont("Arial", 14))
-        self.clear_pairs_btn.setMinimumHeight(35)
+        self.clear_pairs_btn.setFont(QFont("Arial", 10))
+        self.clear_pairs_btn.setMinimumHeight(28)
         pairs_btn_layout.addWidget(self.clear_pairs_btn)
         
         self.save_pairs_btn = QPushButton("Save Pairs")
-        self.save_pairs_btn.setFont(QFont("Arial", 14))
-        self.save_pairs_btn.setMinimumHeight(35)
+        self.save_pairs_btn.setFont(QFont("Arial", 10))
+        self.save_pairs_btn.setMinimumHeight(28)
         pairs_btn_layout.addWidget(self.save_pairs_btn)
         
         self.load_pairs_btn = QPushButton("Load Pairs")
-        self.load_pairs_btn.setFont(QFont("Arial", 14))
-        self.load_pairs_btn.setMinimumHeight(35)
+        self.load_pairs_btn.setFont(QFont("Arial", 10))
+        self.load_pairs_btn.setMinimumHeight(28)
         pairs_btn_layout.addWidget(self.load_pairs_btn)
         
         pairs_layout.addLayout(pairs_btn_layout)
@@ -369,10 +369,10 @@ class MainWindow(QMainWindow):
         headers = ["No.", "Moisture Column", "Pressure Column", "Actions"]
         for i, header in enumerate(headers):
             label = QLabel(header)
-            label.setFont(QFont("Arial", 14, QFont.Bold))
+            label.setFont(QFont("Arial", 10, QFont.Bold))
             self.pairs_layout.addWidget(label, 0, i)
         
-        # Create 6 pairs (restored to original)
+        # Create 6 pairs
         self.moisture_combos = []
         self.pressure_combos = []
         self.pair_buttons = []
@@ -382,20 +382,20 @@ class MainWindow(QMainWindow):
             
             # Number
             num_label = QLabel(str(i + 1))
-            num_label.setFont(QFont("Arial", 14))
+            num_label.setFont(QFont("Arial", 10))
             self.pairs_layout.addWidget(num_label, row, 0)
             
             # Moisture combo
             moisture_combo = QComboBox()
-            moisture_combo.setFont(QFont("Arial", 14))
-            moisture_combo.setMinimumHeight(35)
+            moisture_combo.setFont(QFont("Arial", 9))
+            moisture_combo.setMinimumHeight(26)
             self.moisture_combos.append(moisture_combo)
             self.pairs_layout.addWidget(moisture_combo, row, 1)
             
             # Pressure combo
             pressure_combo = QComboBox()
-            pressure_combo.setFont(QFont("Arial", 14))
-            pressure_combo.setMinimumHeight(35)
+            pressure_combo.setFont(QFont("Arial", 9))
+            pressure_combo.setMinimumHeight(26)
             self.pressure_combos.append(pressure_combo)
             self.pairs_layout.addWidget(pressure_combo, row, 2)
             
@@ -404,11 +404,11 @@ class MainWindow(QMainWindow):
             action_layout.setSpacing(5)
             
             set_btn = QPushButton("Set")
-            set_btn.setFont(QFont("Arial", 12))
-            set_btn.setMinimumHeight(30)
+            set_btn.setFont(QFont("Arial", 9))
+            set_btn.setMinimumHeight(24)
             clear_btn = QPushButton("Clear")
-            clear_btn.setFont(QFont("Arial", 12))
-            clear_btn.setMinimumHeight(30)
+            clear_btn.setFont(QFont("Arial", 9))
+            clear_btn.setMinimumHeight(24)
             
             # Connect buttons with lambda to capture index
             set_btn.clicked.connect(lambda checked, idx=i: self.set_pair_from_selection(idx))
@@ -429,18 +429,18 @@ class MainWindow(QMainWindow):
     def create_difference_section(self, parent_layout):
         """Create difference calculation section"""
         diff_group = QGroupBox("Difference Calculation")
-        diff_group.setFont(QFont("Arial", 16))
+        diff_group.setFont(QFont("Arial", 12))
         diff_layout = QVBoxLayout(diff_group)
         diff_layout.setSpacing(8)
         diff_layout.setContentsMargins(10, 10, 10, 10)
         
         # Difference options
         self.enable_30min_diff_cb = QCheckBox("Calculate Difference at 30min")
-        self.enable_30min_diff_cb.setFont(QFont("Arial", 14))
+        self.enable_30min_diff_cb.setFont(QFont("Arial", 10))
         diff_layout.addWidget(self.enable_30min_diff_cb)
         
         self.enable_multi_time_diff_cb = QCheckBox("Calculate at 20/40/60min")
-        self.enable_multi_time_diff_cb.setFont(QFont("Arial", 14))
+        self.enable_multi_time_diff_cb.setFont(QFont("Arial", 10))
         diff_layout.addWidget(self.enable_multi_time_diff_cb)
         
         # Reference settings
@@ -448,40 +448,40 @@ class MainWindow(QMainWindow):
         ref_grid.setSpacing(10)
         
         ref1_label = QLabel("Reference Column:")
-        ref1_label.setFont(QFont("Arial", 16))
+        ref1_label.setFont(QFont("Arial", 11))
         ref_grid.addWidget(ref1_label, 0, 0)
         
         self.reference_combo = QComboBox()
-        self.reference_combo.setFont(QFont("Arial", 14))
-        self.reference_combo.setMinimumHeight(35)
+        self.reference_combo.setFont(QFont("Arial", 10))
+        self.reference_combo.setMinimumHeight(28)
         ref_grid.addWidget(self.reference_combo, 0, 1)
         
         ref2_label = QLabel("Second Reference:")
-        ref2_label.setFont(QFont("Arial", 16))
+        ref2_label.setFont(QFont("Arial", 11))
         ref_grid.addWidget(ref2_label, 1, 0)
         
         self.reference2_combo = QComboBox()
-        self.reference2_combo.setFont(QFont("Arial", 14))
-        self.reference2_combo.setMinimumHeight(35)
+        self.reference2_combo.setFont(QFont("Arial", 10))
+        self.reference2_combo.setMinimumHeight(28)
         ref_grid.addWidget(self.reference2_combo, 1, 1)
         
         window_label = QLabel("Time Window (min):")
-        window_label.setFont(QFont("Arial", 16))
+        window_label.setFont(QFont("Arial", 11))
         ref_grid.addWidget(window_label, 2, 0)
         
         self.time_window_spin = QDoubleSpinBox()
-        self.time_window_spin.setFont(QFont("Arial", 14))
+        self.time_window_spin.setFont(QFont("Arial", 10))
         self.time_window_spin.setRange(0.1, 30.0)
         self.time_window_spin.setValue(5.0)
-        self.time_window_spin.setMinimumHeight(35)
+        self.time_window_spin.setMinimumHeight(28)
         ref_grid.addWidget(self.time_window_spin, 2, 1)
         
         diff_layout.addLayout(ref_grid)
         
         # Set reference button
         self.set_ref_btn = QPushButton("Set Reference from Selection")
-        self.set_ref_btn.setFont(QFont("Arial", 14))
-        self.set_ref_btn.setMinimumHeight(35)
+        self.set_ref_btn.setFont(QFont("Arial", 10))
+        self.set_ref_btn.setMinimumHeight(28)
         diff_layout.addWidget(self.set_ref_btn)
         
         parent_layout.addWidget(diff_group)
@@ -489,20 +489,20 @@ class MainWindow(QMainWindow):
     def create_action_section(self, parent_layout):
         """Create action buttons section"""
         action_group = QGroupBox("Actions")
-        action_group.setFont(QFont("Arial", 16))
+        action_group.setFont(QFont("Arial", 12))
         action_layout = QHBoxLayout(action_group)
         action_layout.setSpacing(20)
         action_layout.setContentsMargins(10, 10, 10, 10)
         
         self.plot_button = QPushButton("Generate Chart")
-        self.plot_button.setFont(QFont("Arial", 18, QFont.Bold))  # Larger for main actions
-        self.plot_button.setMinimumHeight(50)
-        self.plot_button.setMinimumWidth(180)
+        self.plot_button.setFont(QFont("Arial", 12, QFont.Bold))  # Academic paper standard
+        self.plot_button.setMinimumHeight(36)
+        self.plot_button.setMinimumWidth(140)
         
         self.export_button = QPushButton("Export Data")
-        self.export_button.setFont(QFont("Arial", 18, QFont.Bold))  # Larger for main actions
-        self.export_button.setMinimumHeight(50)
-        self.export_button.setMinimumWidth(180)
+        self.export_button.setFont(QFont("Arial", 12, QFont.Bold))  # Academic paper standard
+        self.export_button.setMinimumHeight(36)
+        self.export_button.setMinimumWidth(140)
         
         action_layout.addWidget(self.plot_button)
         action_layout.addWidget(self.export_button)

@@ -81,11 +81,11 @@ class IndependentPlotWindow(QMainWindow):
             self.figure.clear()
             ax = self.figure.add_subplot(111)
             
-            # Configure matplotlib for English fonts
+            # Configure matplotlib for academic paper standards
             plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica']
             plt.rcParams['mathtext.fontset'] = 'dejavusans'
             plt.rcParams['axes.unicode_minus'] = False
-            plt.rcParams['font.weight'] = 'bold'
+            plt.rcParams['font.size'] = 10  # Academic standard base font size
             
             # Get time column
             time_col = plot_settings.get('time_column', 'time')
@@ -126,7 +126,7 @@ class IndependentPlotWindow(QMainWindow):
                             ax.plot(valid_data['relative_time'], valid_data[col],
                                   '-', color=colors[color_idx],
                                   label=f"{col} (original)",
-                                  linewidth=2.5, alpha=0.7)
+                                  linewidth=2.0, alpha=0.7)
                     
                     # Plot calibrated data
                     calib_col = f"{col}_calib"
@@ -137,7 +137,7 @@ class IndependentPlotWindow(QMainWindow):
                         calib_color = calib_colors[color_idx % len(calib_colors)]
                         ax.plot(times, values, '--', color=calib_color,
                               label=f"{col} (calibrated)",
-                              linewidth=3.0, marker='o', markersize=3,
+                              linewidth=2.5, marker='o', markersize=2,
                               markevery=len(times)//20)
                         
                         # Add error range if requested
@@ -153,22 +153,22 @@ class IndependentPlotWindow(QMainWindow):
                     if not valid_data.empty:
                         ax.plot(valid_data['relative_time'], valid_data[col],
                               '-', color=colors[color_idx], label=col,
-                              linewidth=2.5)
+                              linewidth=2.0)
             
-            # Set labels and title
-            ax.set_xlabel("Time (hours)", fontsize=14, fontweight='bold')
-            ax.set_ylabel("Water Concentration (ppm)", fontsize=14, fontweight='bold')
+            # Set labels and title - academic paper standards
+            ax.set_xlabel("Time (hours)", fontsize=11, fontweight='normal')
+            ax.set_ylabel("Water Concentration (ppm)", fontsize=11, fontweight='normal')
             
-            # Set up legend
-            legend = ax.legend(loc='best', frameon=True, fontsize=12, markerscale=2)
+            # Set up legend - smaller for academic papers
+            legend = ax.legend(loc='best', frameon=True, fontsize=9, markerscale=1.5)
             for line in legend.get_lines():
-                line.set_linewidth(3.0)
+                line.set_linewidth(2.0)
             
             # Set grid
             ax.grid(True, linestyle='--', alpha=0.7)
             
-            # Set tick parameters
-            ax.tick_params(axis='both', which='major', labelsize=11)
+            # Set tick parameters - academic standard
+            ax.tick_params(axis='both', which='major', labelsize=10)
             
             # Add time markers if showing specific range
             time_range = plot_settings.get('time_range', 0)  # 0=all, 1=2hours, 2=custom
@@ -176,14 +176,14 @@ class IndependentPlotWindow(QMainWindow):
                 time_ticks = [0, 0.5, 1, 1.5, 2]
                 time_labels = ['0', '30 min', '1 hour', '1.5 hours', '2 hours']
                 ax.set_xticks(time_ticks)
-                ax.set_xticklabels(time_labels)
+                ax.set_xticklabels(time_labels, fontsize=10)
             
             # Mark 30min line if difference calculation is enabled
             if plot_settings.get('enable_30min_diff', False):
-                ax.axvline(x=0.5, color='gray', linestyle='--', alpha=0.7, linewidth=2.0)
+                ax.axvline(x=0.5, color='gray', linestyle='--', alpha=0.7, linewidth=1.5)
                 ax.text(0.5, ax.get_ylim()[0], '30min', 
                       horizontalalignment='center', verticalalignment='bottom',
-                      fontsize=12, fontweight='bold')
+                      fontsize=10, fontweight='normal')
             
             plt.tight_layout()
             self.canvas.draw()
