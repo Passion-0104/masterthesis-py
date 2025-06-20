@@ -443,6 +443,11 @@ class MainWindow(QMainWindow):
         self.enable_multi_time_diff_cb.setFont(QFont("Arial", 10))
         diff_layout.addWidget(self.enable_multi_time_diff_cb)
         
+        # 新增：每隔20分钟计算差值选项
+        self.enable_20min_interval_diff_cb = QCheckBox("Calculate Difference Every 20min")
+        self.enable_20min_interval_diff_cb.setFont(QFont("Arial", 10))
+        diff_layout.addWidget(self.enable_20min_interval_diff_cb)
+        
         # Reference settings
         ref_grid = QGridLayout()
         ref_grid.setSpacing(10)
@@ -592,11 +597,17 @@ class MainWindow(QMainWindow):
         self.column_list.clear()
         self.column_list.addItems(columns)
         
-        # Update combos
-        for combo in [self.time_column_combo, self.reference_combo, 
-                     self.reference2_combo] + self.moisture_combos + self.pressure_combos:
+        # Update time column combo
+        self.time_column_combo.clear()
+        self.time_column_combo.addItems(columns)
+        
+        # Update pair combos
+        for combo in self.moisture_combos + self.pressure_combos:
             combo.clear()
             combo.addItems(columns)
+            
+        # Update reference column combos with filtering
+        self.update_reference_column_options(columns)
             
         # Set default time column
         if time_columns:
@@ -836,7 +847,7 @@ class MainWindow(QMainWindow):
             
         try:
             # Prepare plot settings
-            plot_settings = self._get_plot_settings()
+            plot_settings = self._get_plot_settings(selected_columns)
             
             # Get data
             data = self.data_loader.data
@@ -852,7 +863,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to generate chart: {str(e)}")
             
-    def _get_plot_settings(self):
+    def _get_plot_settings(self, selected_columns=None):
         """Get current plot settings"""
         # Get time range
         time_range = 0  # All data
@@ -876,7 +887,7 @@ class MainWindow(QMainWindow):
             self.p_ref_spin.value()
         )
         
-        return {
+        settings = {
             'time_column': self.time_column_combo.currentText(),
             'time_range': time_range,
             'start_time': self.start_time_spin.value(),
@@ -890,9 +901,18 @@ class MainWindow(QMainWindow):
             'f2': self.f2_spin.value(),
             'p_ref': self.p_ref_spin.value(),
             'enable_30min_diff': self.enable_30min_diff_cb.isChecked(),
+            'enable_multi_time_diff': self.enable_multi_time_diff_cb.isChecked(),
+            'enable_20min_interval_diff': self.enable_20min_interval_diff_cb.isChecked(),
             'reference_column': self.reference_combo.currentText(),
+            'reference2_column': self.reference2_combo.currentText(),
             'time_window': self.time_window_spin.value()
         }
+        
+        # Add selected columns if provided
+        if selected_columns is not None:
+            settings['selected_columns'] = selected_columns
+            
+        return settings
         
     def export_data(self):
         """Export data to Excel"""
@@ -985,3 +1005,35 @@ class MainWindow(QMainWindow):
                 window.close()
                 
         event.accept() 
+
+    def update_reference_column_options(self, columns):
+        """Update reference column dropdown options"""
+        self.reference_combo.clear()
+        self.reference2_combo.clear()
+        
+        # 过滤掉时间相关的列
+        data_columns = []
+        for col in columns:
+            # 排除时间列和非数据列
+            if col.lower() not in ['zeit', 'time', 'timestamp', 'datetime']:
+                data_columns.append(col)
+        
+        # 添加提示信息
+        if data_columns:
+            self.reference_combo.addItem("选择参考列...")
+            self.reference_combo.addItems(data_columns)
+            
+            self.reference2_combo.addItem("选择第二参考列...")
+            self.reference2_combo.addItems(data_columns)
+            
+            # 尝试自动选择可能的参考列
+            for col in data_columns:
+                if 'reference' in col.lower() or 'ref' in col.lower():
+                    index = self.reference_combo.findText(col)
+                    if index >= 0:
+                        self.reference_combo.setCurrentIndex(index)
+                        break
+        else:
+            self.reference_combo.addItem("无可用的数据列")
+            self.reference2_combo.addItem("无可用的数据列")
+ 
