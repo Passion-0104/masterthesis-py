@@ -15,6 +15,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 from data_processing.data_loader import DataLoader
+from data_processing.slope_calculator import SlopeCalculator
 from calibration.calibration_core import CalibrationCore
 from calibration.parameter_manager import ParameterManager
 from ui.plot_widget import IndependentPlotWindow
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.data_loader = DataLoader()
+        self.slope_calculator = SlopeCalculator()
         self.calibration_core = CalibrationCore()
         self.parameter_manager = ParameterManager()
         self.plot_windows = []  # Track opened plot windows
@@ -448,6 +450,21 @@ class MainWindow(QMainWindow):
         self.enable_20min_interval_diff_cb.setFont(QFont("Arial", 10))
         diff_layout.addWidget(self.enable_20min_interval_diff_cb)
         
+        # 新增：斜率计算选项
+        self.enable_slope_calc_cb = QCheckBox("Enable Slope Calculation")
+        self.enable_slope_calc_cb.setFont(QFont("Arial", 10))
+        diff_layout.addWidget(self.enable_slope_calc_cb)
+        
+        # 斜率设置按钮
+        slope_settings_layout = QHBoxLayout()
+        self.slope_settings_btn = QPushButton("Slope Settings")
+        self.slope_settings_btn.setFont(QFont("Arial", 10))
+        self.slope_settings_btn.setMinimumHeight(28)
+        self.slope_settings_btn.setEnabled(False)  # 默认禁用
+        slope_settings_layout.addWidget(self.slope_settings_btn)
+        slope_settings_layout.addStretch()
+        diff_layout.addLayout(slope_settings_layout)
+        
         # Reference settings
         ref_grid = QGridLayout()
         ref_grid.setSpacing(10)
@@ -537,12 +554,19 @@ class MainWindow(QMainWindow):
         # Reference operations
         self.set_ref_btn.clicked.connect(self.set_reference_from_selection)
         
+        # Slope operations
+        self.enable_slope_calc_cb.toggled.connect(self.toggle_slope_controls)
+        self.slope_settings_btn.clicked.connect(self.open_slope_settings)
+        
         # Main actions
         self.plot_button.clicked.connect(self.generate_chart)
         self.export_button.clicked.connect(self.export_data)
         
         # Initially toggle calibration controls
         self.toggle_calibration_controls()
+        
+        # Initialize slope settings
+        self.slope_interval = 15.0  # Default 15 minutes interval
         
     def set_controls_enabled(self, enabled):
         """Enable or disable controls based on data availability"""
@@ -739,6 +763,17 @@ class MainWindow(QMainWindow):
         
         QMessageBox.information(self, "Reference Column", 
                               f"Reference column set to: {ref_col}")
+    
+    def toggle_slope_controls(self):
+        """Toggle slope calculation controls"""
+        enabled = self.enable_slope_calc_cb.isChecked()
+        self.slope_settings_btn.setEnabled(enabled)
+        
+    def open_slope_settings(self):
+        """Open slope settings dialog"""
+        dialog = SlopeSettingsDialog(self, self.slope_interval)
+        if dialog.exec_() == QDialog.Accepted:
+            self.slope_interval = dialog.get_settings()
         
     def import_parameters(self):
         """Import calibration parameters"""
@@ -903,6 +938,8 @@ class MainWindow(QMainWindow):
             'enable_30min_diff': self.enable_30min_diff_cb.isChecked(),
             'enable_multi_time_diff': self.enable_multi_time_diff_cb.isChecked(),
             'enable_20min_interval_diff': self.enable_20min_interval_diff_cb.isChecked(),
+            'enable_slope_calc': self.enable_slope_calc_cb.isChecked(),
+            'slope_interval': self.slope_interval,
             'reference_column': self.reference_combo.currentText(),
             'reference2_column': self.reference2_combo.currentText(),
             'time_window': self.time_window_spin.value()
@@ -1036,4 +1073,67 @@ class MainWindow(QMainWindow):
         else:
             self.reference_combo.addItem("无可用的数据列")
             self.reference2_combo.addItem("无可用的数据列")
+
+
+class SlopeSettingsDialog(QDialog):
+    """Slope calculation settings dialog"""
+    
+    def __init__(self, parent=None, current_interval=15.0):
+        super().__init__(parent)
+        self.setWindowTitle("Slope Calculation Settings")
+        self.setFixedSize(350, 180)
+        self.current_interval = current_interval
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the dialog UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title = QLabel("Configure Slope Calculation")
+        title.setFont(QFont("Arial", 14, QFont.Bold))
+        layout.addWidget(title)
+        
+        # Settings grid
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        
+        # Time interval setting
+        interval_label = QLabel("Time Interval (minutes):")
+        interval_label.setFont(QFont("Arial", 11))
+        grid.addWidget(interval_label, 0, 0)
+        
+        self.interval_spin = QDoubleSpinBox()
+        self.interval_spin.setFont(QFont("Arial", 11))
+        self.interval_spin.setRange(1.0, 120.0)
+        self.interval_spin.setValue(self.current_interval)
+        self.interval_spin.setDecimals(1)
+        self.interval_spin.setSuffix(" min")
+        self.interval_spin.setMinimumHeight(30)
+        grid.addWidget(self.interval_spin, 0, 1)
+        
+        layout.addLayout(grid)
+        
+        # Description
+        desc = QLabel("Calculate slope every X minutes using X-minute intervals.\n"
+                     "Example: 15 min interval calculates slope between\n"
+                     "consecutive 15-minute data points.")
+        desc.setFont(QFont("Arial", 9))
+        desc.setStyleSheet("color: #666666;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        
+        layout.addStretch()
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_settings(self):
+        """Get the configured settings"""
+        return self.interval_spin.value()
  

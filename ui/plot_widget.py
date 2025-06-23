@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import pandas as pd
+from data_processing.slope_calculator import SlopeCalculator
 
 
 class IndependentPlotWindow(QMainWindow):
@@ -30,6 +31,7 @@ class IndependentPlotWindow(QMainWindow):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.slope_calculator = SlopeCalculator()
         self.setup_ui()
         
     def setup_ui(self):
@@ -220,6 +222,9 @@ class IndependentPlotWindow(QMainWindow):
             
             # Add selected columns to plot settings for difference calculation
             plot_settings['selected_columns'] = selected_columns
+            
+            # Calculate and display slope results if enabled
+            self._calculate_and_display_slopes(plot_df, plot_settings)
             
             # Calculate and display difference results if enabled
             self._calculate_and_display_differences(plot_df, calibrated_data, plot_settings)
@@ -835,6 +840,329 @@ class IndependentPlotWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to copy chart: {str(e)}")
+    
+    def _calculate_and_display_slopes(self, plot_df, plot_settings):
+        """计算并显示斜率结果"""
+        if not plot_settings.get('enable_slope_calc', False):
+            return
+        
+        try:
+            selected_columns = plot_settings.get('selected_columns', [])
+            if not selected_columns:
+                return
+            
+            # 获取斜率计算设置
+            interval_minutes = plot_settings.get('slope_interval', 15.0)
+            time_column = plot_settings.get('time_column', 'time')
+            
+            print(f"Debug: Starting interval-based slope calculation - interval: {interval_minutes} minutes")
+            
+            # 计算斜率
+            slope_results = self.slope_calculator.calculate_slopes(
+                plot_df, selected_columns, time_column, interval_minutes
+            )
+            
+            if not slope_results:
+                print("Debug: 没有计算出斜率结果")
+                QMessageBox.warning(self, "斜率计算", "没有计算出斜率结果，请检查数据和设置")
+                return
+            
+            print(f"Debug: 计算出 {len(slope_results)} 列的斜率")
+            
+            # 创建独立的斜率图表窗口
+            self._create_slope_chart_window(slope_results, plot_settings)
+            
+            # 显示斜率统计信息
+            self._show_slope_statistics(slope_results)
+            
+        except Exception as e:
+            print(f"Debug: 斜率计算异常: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "斜率计算错误", f"计算斜率时出错: {str(e)}")
+    
+    def _create_slope_chart_window(self, slope_results, plot_settings):
+        """创建斜率图表窗口"""
+        try:
+            from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout
+            
+            # 创建新窗口
+            slope_window = QMainWindow(self)
+            slope_window.setWindowTitle("Slope Chart")
+            slope_window.setGeometry(300, 300, 1000, 600)
+            
+            # 创建中心部件
+            central_widget = QWidget()
+            slope_window.setCentralWidget(central_widget)
+            layout = QVBoxLayout(central_widget)
+            
+            # 添加顶部工具栏
+            toolbar_layout = QHBoxLayout()
+            save_data_btn = QPushButton("Save Data")
+            save_data_btn.setFont(QFont("Arial", 10))
+            save_data_btn.clicked.connect(lambda: self._manual_save_slope_data(slope_results, plot_settings))
+            
+            toolbar_layout.addWidget(save_data_btn)
+            toolbar_layout.addStretch()
+            layout.addLayout(toolbar_layout)
+            
+            # 创建绘图
+            figure = Figure(figsize=(12, 8))
+            canvas = FigureCanvas(figure)
+            toolbar = NavigationToolbar(canvas, slope_window)
+            
+            layout.addWidget(toolbar)
+            layout.addWidget(canvas)
+            
+            # 绘制斜率图
+            ax = figure.add_subplot(111)
+            
+            # 配置matplotlib
+            plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica']
+            plt.rcParams['font.size'] = 10
+            
+            colors = plt.cm.tab10.colors
+            
+            for i, (col, data) in enumerate(slope_results.items()):
+                color = colors[i % len(colors)]
+                times = data['times']
+                slopes = data['slopes']
+                
+                # Academic paper style: smooth line without markers
+                ax.plot(times, slopes, '-', color=color, linewidth=1.5, alpha=0.9, 
+                       label=f"{col} Slope")
+                
+                # Add zero reference line only once
+                if i == 0:
+                    ax.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=0.8)
+            
+            # Academic paper style labels and formatting
+            ax.set_xlabel("Time (hours)", fontsize=12, fontfamily='serif')
+            ax.set_ylabel(f"Slope ({slope_results[list(slope_results.keys())[0]]['units']})", fontsize=12, fontfamily='serif')
+            
+            # Clean title for academic papers
+            interval_min = slope_results[list(slope_results.keys())[0]]['interval_minutes']
+            ax.set_title(f"Slope vs Time ({interval_min}-minute intervals)", 
+                        fontsize=14, fontfamily='serif', pad=20)
+            
+            # Academic style legend
+            legend = ax.legend(loc='best', frameon=False, fontsize=10)
+            for text in legend.get_texts():
+                text.set_fontfamily('serif')
+            
+            # Clean grid for academic papers
+            ax.grid(True, linestyle='-', alpha=0.2, linewidth=0.5)
+            
+            # Academic style ticks
+            ax.tick_params(axis='both', which='major', labelsize=10, direction='out', length=4, width=0.8)
+            ax.tick_params(axis='both', which='minor', labelsize=8, direction='out', length=2, width=0.5)
+            
+            # Remove top and right spines for cleaner look
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_linewidth(0.8)
+            ax.spines['bottom'].set_linewidth(0.8)
+            
+            plt.tight_layout()
+            canvas.draw()
+            
+            # 显示窗口
+            slope_window.show()
+            
+            # 保存窗口引用（防止被垃圾回收）
+            if not hasattr(self, 'slope_windows'):
+                self.slope_windows = []
+            self.slope_windows.append(slope_window)
+            
+        except Exception as e:
+            print(f"Debug: 创建斜率图表窗口异常: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "错误", f"创建斜率图表失败: {str(e)}")
+    
+    def _show_slope_statistics(self, slope_results):
+        """显示斜率统计信息"""
+        try:
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
+            
+            # 获取统计信息
+            stats = self.slope_calculator.get_slope_statistics(slope_results)
+            
+            if not stats:
+                return
+            
+            # 创建对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle("斜率统计信息")
+            dialog.setGeometry(400, 400, 500, 400)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # 构建统计信息文本
+            stats_text = "=== 斜率统计信息 ===\n\n"
+            
+            for col, col_stats in stats.items():
+                stats_text += f"--- {col} ---\n"
+                stats_text += f"平均斜率: {col_stats['mean_slope']:.6f} ppm/小时\n"
+                stats_text += f"标准差: {col_stats['std_slope']:.6f} ppm/小时\n"
+                stats_text += f"最大斜率: {col_stats['max_slope']:.6f} ppm/小时\n"
+                stats_text += f"最小斜率: {col_stats['min_slope']:.6f} ppm/小时\n"
+                stats_text += f"中位数斜率: {col_stats['median_slope']:.6f} ppm/小时\n"
+
+                stats_text += f"数据点数: {col_stats['num_points']}\n\n"
+            
+            # 文本显示区域
+            text_edit = QTextEdit()
+            text_edit.setPlainText(stats_text)
+            text_edit.setReadOnly(True)
+            layout.addWidget(text_edit)
+            
+            # 按钮
+            button_layout = QHBoxLayout()
+            
+            # 保存按钮
+            save_btn = QPushButton("保存统计信息")
+            save_btn.clicked.connect(lambda: self._save_slope_statistics(stats_text))
+            button_layout.addWidget(save_btn)
+            
+            # 导出数据按钮
+            export_btn = QPushButton("导出斜率数据")
+            export_btn.clicked.connect(lambda: self._export_slope_data(slope_results))
+            button_layout.addWidget(export_btn)
+            
+            # 关闭按钮
+            close_btn = QPushButton("关闭")
+            close_btn.clicked.connect(dialog.accept)
+            button_layout.addWidget(close_btn)
+            
+            layout.addLayout(button_layout)
+            
+            # 显示对话框
+            dialog.exec_()
+            
+        except Exception as e:
+            print(f"Debug: 显示斜率统计异常: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "错误", f"显示斜率统计失败: {str(e)}")
+    
+    def _save_slope_statistics(self, stats_text):
+        """保存斜率统计信息"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "保存斜率统计信息", "", 
+            "文本文件 (*.txt);;所有文件 (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(stats_text)
+                QMessageBox.information(self, "成功", f"统计信息已保存到 {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"保存失败: {str(e)}")
+    
+    def _export_slope_data(self, slope_results):
+        """导出斜率数据"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出斜率数据", "", 
+            "Excel文件 (*.xlsx);;CSV文件 (*.csv);;所有文件 (*)"
+        )
+        
+        if file_path:
+            try:
+                # 导出为DataFrame
+                slope_df = self.slope_calculator.export_slope_data(slope_results)
+                
+                if file_path.endswith('.xlsx'):
+                    slope_df.to_excel(file_path, index=False)
+                elif file_path.endswith('.csv'):
+                    slope_df.to_csv(file_path, index=False, encoding='utf-8-sig')
+                else:
+                    # 默认保存为Excel
+                    slope_df.to_excel(file_path, index=False)
+                
+                QMessageBox.information(self, "成功", f"斜率数据已导出到 {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
+    
+    def _manual_save_slope_data(self, slope_results, plot_settings):
+        """Manual save slope data with user selection"""
+        try:
+            from datetime import datetime
+            
+            # Ask user to choose save location and filename
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Slope Calculation Results", 
+                f"slope_calculation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                "Excel files (*.xlsx);;CSV files (*.csv);;All files (*)"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Export slope data
+            slope_df = self.slope_calculator.export_slope_data(slope_results)
+            
+            if file_path.endswith('.xlsx'):
+                slope_df.to_excel(file_path, index=False)
+            elif file_path.endswith('.csv'):
+                slope_df.to_csv(file_path, index=False, encoding='utf-8-sig')
+            else:
+                # Default to Excel
+                slope_df.to_excel(file_path + '.xlsx', index=False)
+                file_path += '.xlsx'
+            
+            print(f"Debug: Slope data saved to: {file_path}")
+            
+            # Also save detailed information
+            base_path = file_path.rsplit('.', 1)[0]
+            details_path = f"{base_path}_details.txt"
+            
+            stats = self.slope_calculator.get_slope_statistics(slope_results)
+            
+            with open(details_path, 'w', encoding='utf-8') as f:
+                f.write("=== Slope Calculation Details ===\n\n")
+                f.write(f"Calculation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Time Interval: {plot_settings.get('slope_interval', 15.0)} minutes\n")
+                f.write(f"Calculation Method: Interval-based slope calculation\n\n")
+                
+                f.write("=== Statistical Information ===\n\n")
+                for col, col_stats in stats.items():
+                    f.write(f"--- {col} ---\n")
+                    f.write(f"Mean Slope: {col_stats['mean_slope']:.6f} ppm/hour\n")
+                    f.write(f"Standard Deviation: {col_stats['std_slope']:.6f} ppm/hour\n")
+                    f.write(f"Maximum Slope: {col_stats['max_slope']:.6f} ppm/hour\n")
+                    f.write(f"Minimum Slope: {col_stats['min_slope']:.6f} ppm/hour\n")
+                    f.write(f"Median Slope: {col_stats['median_slope']:.6f} ppm/hour\n")
+                    f.write(f"Number of Points: {col_stats['num_points']}\n\n")
+                
+                # Add detailed calculation point information
+                f.write("=== Detailed Calculation Points ===\n\n")
+                for col, data in slope_results.items():
+                    f.write(f"--- {col} ---\n")
+                    if 'used_points' in data:
+                        for i, point_info in enumerate(data['used_points'][:10]):  # Show first 10 points
+                            f.write(f"Point {i+1}: Time={point_info['calc_time']:.3f}h, "
+                                   f"Interval=[{point_info['point1_time']:.3f}h, {point_info['point2_time']:.3f}h], "
+                                   f"Values=[{point_info['value1']:.6f}, {point_info['value2']:.6f}], "
+                                   f"Slope={point_info['slope']:.6f}\n")
+                        if len(data['used_points']) > 10:
+                            f.write(f"... and {len(data['used_points']) - 10} more calculation points\n")
+                    f.write("\n")
+            
+            print(f"Debug: Detailed information saved to: {details_path}")
+            
+            # Show success message
+            QMessageBox.information(self, "Save Complete", 
+                                   f"Slope calculation results saved:\n"
+                                   f"Data file: {file_path}\n"
+                                   f"Details file: {details_path}")
+            
+        except Exception as e:
+            print(f"Debug: Manual save failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Save Error", f"Failed to save slope data: {str(e)}")
 
 
 class PlotWidget(QWidget):
