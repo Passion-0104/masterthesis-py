@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                            QGridLayout, QMessageBox, QFileDialog, QRadioButton,
                            QButtonGroup, QFrame, QScrollArea, QApplication,
                            QAbstractItemView, QSplitter, QTextEdit, QDialog,
-                           QDialogButtonBox)
+                           QDialogButtonBox, QLineEdit)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
@@ -77,6 +77,9 @@ class MainWindow(QMainWindow):
         columns_layout.addLayout(right_column, 1)  # Equal weight
         
         main_layout.addLayout(columns_layout)
+        
+        # Chart settings section (full width)
+        self.create_chart_settings_section(main_layout)
         
         # Action buttons section (full width)
         self.create_action_section(main_layout)
@@ -507,6 +510,43 @@ class MainWindow(QMainWindow):
         diff_layout.addWidget(self.set_ref_btn)
         
         parent_layout.addWidget(diff_group)
+        
+    def create_chart_settings_section(self, parent_layout):
+        """Create chart settings section"""
+        chart_group = QGroupBox("图表设置")
+        chart_group.setFont(QFont("Arial", 12))
+        chart_layout = QHBoxLayout(chart_group)
+        chart_layout.setSpacing(10)
+        chart_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Y-axis label setting
+        ylabel_label = QLabel("纵坐标标签:")
+        ylabel_label.setFont(QFont("Arial", 11))
+        chart_layout.addWidget(ylabel_label)
+        
+        # Create input field for custom y-axis label
+        self.ylabel_input = QLineEdit()
+        self.ylabel_input.setFont(QFont("Arial", 10))
+        self.ylabel_input.setPlaceholderText("输入自定义纵坐标标签，例如：水浓度 (ppm)")
+        self.ylabel_input.setText("Water Concentration (ppm)")  # Default value
+        self.ylabel_input.setMinimumHeight(28)
+        self.ylabel_input.setMaximumWidth(400)
+        chart_layout.addWidget(self.ylabel_input, 1)
+        
+        # Reset button
+        reset_ylabel_btn = QPushButton("重置为默认")
+        reset_ylabel_btn.setFont(QFont("Arial", 10))
+        reset_ylabel_btn.setMinimumHeight(28)
+        reset_ylabel_btn.clicked.connect(self.reset_ylabel_to_default)
+        chart_layout.addWidget(reset_ylabel_btn)
+        
+        chart_layout.addStretch()
+        
+        parent_layout.addWidget(chart_group)
+        
+    def reset_ylabel_to_default(self):
+        """Reset Y-axis label to default value"""
+        self.ylabel_input.setText("Water Concentration (ppm)")
         
     def create_action_section(self, parent_layout):
         """Create action buttons section"""
@@ -942,7 +982,8 @@ class MainWindow(QMainWindow):
             'slope_interval': self.slope_interval,
             'reference_column': self.reference_combo.currentText(),
             'reference2_column': self.reference2_combo.currentText(),
-            'time_window': self.time_window_spin.value()
+            'time_window': self.time_window_spin.value(),
+            'custom_ylabel': self.ylabel_input.text().strip() if hasattr(self, 'ylabel_input') else "Water Concentration (ppm)"
         }
         
         # Add selected columns if provided

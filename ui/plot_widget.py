@@ -159,7 +159,12 @@ class IndependentPlotWindow(QMainWindow):
             
             # Set labels and title - academic paper standards
             ax.set_xlabel("Time (hours)", fontsize=11, fontweight='normal')
-            ax.set_ylabel("Water Concentration (ppm)", fontsize=11, fontweight='normal')
+            
+            # Use custom Y-axis label if provided, otherwise use default
+            custom_ylabel = plot_settings.get('custom_ylabel', 'Water Concentration (ppm)')
+            if not custom_ylabel or custom_ylabel.strip() == '':
+                custom_ylabel = 'Water Concentration (ppm)'
+            ax.set_ylabel(custom_ylabel, fontsize=11, fontweight='normal')
             
             # Set up legend - smaller for academic papers
             legend = ax.legend(loc='best', frameon=True, fontsize=9, markerscale=1.5)
