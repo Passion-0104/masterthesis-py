@@ -6,6 +6,7 @@ import pandas as pd
 import os
 from PyQt5.QtWidgets import QMessageBox
 from data_processing.data_loader import DataLoader
+import numpy as np
 
 
 class MultiFileLoader:
@@ -80,7 +81,7 @@ class MultiFileLoader:
             files_info.append(info)
         return files_info
         
-    def combine_data_segments(self, segments_config):
+    def combine_data_segments(self, segments_config, time_unit="hours"):
         """
         组合多个文件的数据段
         segments_config: 列表，每个元素包含：
@@ -92,12 +93,16 @@ class MultiFileLoader:
             'time_column': 时间列名,
             'label': 自定义标注名称
         }
+        time_unit: 时间单位 ("hours" 或 "minutes")
         """
         try:
             combined_time = []
             combined_values = []
             combined_filenames = []
             time_offset = 0  # 时间偏移，确保数据连续
+            
+            # 根据时间单位设置转换因子
+            time_factor = 1.0 if time_unit == "hours" else 60.0  # 分钟 = 小时 * 60
             
             for i, segment in enumerate(segments_config):
                 file_index = segment['file_index']
@@ -114,26 +119,34 @@ class MultiFileLoader:
                 
                 # 处理时间列
                 if time_column and time_column in data.columns:
-                    data[time_column] = pd.to_datetime(data[time_column], errors='coerce')
-                    data = data.dropna(subset=[time_column])
-                    
-                    if not data.empty:
-                        start_datetime = data[time_column].min()
-                        data['relative_time'] = (data[time_column] - start_datetime).dt.total_seconds() / 3600
-                    else:
-                        continue
+                    # 尝试转换为datetime
+                    try:
+                        data[time_column] = pd.to_datetime(data[time_column], errors='coerce')
+                        data = data.dropna(subset=[time_column])
+                        
+                        if not data.empty:
+                            start_datetime = data[time_column].min()
+                            # 计算相对时间（小时）
+                            data['relative_time'] = (data[time_column] - start_datetime).dt.total_seconds() / 3600.0
+                        else:
+                            continue
+                    except Exception as e:
+                        print(f"时间列处理失败: {e}")
+                        # 如果时间列处理失败，创建虚拟时间
+                        data['relative_time'] = np.arange(len(data)) * 0.01  # 假设每个点间隔0.01小时
                 else:
-                    # 创建虚拟时间列
-                    data['relative_time'] = range(len(data))
+                    # 创建虚拟时间列（假设数据是连续的，间隔合理）
+                    data['relative_time'] = np.arange(len(data)) * 0.01  # 每个点间隔0.01小时
                     
                 # 应用时间范围过滤
-                if start_time is not None:
-                    data = data[data['relative_time'] >= start_time]
+                if start_time is not None and start_time > 0:
+                    data = data[data['relative_time'] >= start_time].copy()
                 if end_time is not None:
-                    data = data[data['relative_time'] <= end_time]
+                    data = data[data['relative_time'] <= end_time].copy()
                     
                 # 检查列是否存在
                 if column not in data.columns:
+                    print(f"警告: 列 '{column}' 在文件中不存在")
                     continue
                     
                 # 转换数据为数值型
@@ -141,32 +154,55 @@ class MultiFileLoader:
                 valid_data = data[['relative_time', column]].dropna()
                 
                 if valid_data.empty:
+                    print(f"警告: 数据段 {i+1} 没有有效数据")
                     continue
+                
+                # 重置时间，使每段数据从time_offset开始
+                segment_time = valid_data['relative_time'].values
+                if len(segment_time) > 0:
+                    # 规范化时间：从0开始
+                    segment_time = segment_time - segment_time.min()
+                    # 添加时间偏移
+                    adjusted_time = segment_time + time_offset
+                    # 根据时间单位转换
+                    final_time = adjusted_time * time_factor
                     
-                # 调整时间，使数据连续
-                adjusted_time = valid_data['relative_time'].values + time_offset
-                values = valid_data[column].values
-                
-                combined_time.extend(adjusted_time)
-                combined_values.extend(values)
-                
-                # 为每个数据点添加自定义标注
-                combined_filenames.extend([label] * len(adjusted_time))
-                
-                # 更新时间偏移
-                if len(adjusted_time) > 0:
-                    time_offset = max(adjusted_time) + 0.1  # 添加小间隔
+                    values = valid_data[column].values
+                    
+                    combined_time.extend(final_time)
+                    combined_values.extend(values)
+                    
+                    # 为每个数据点添加自定义标注
+                    combined_filenames.extend([label] * len(values))
+                    
+                    # 更新时间偏移（以小时为单位）
+                    segment_duration = segment_time.max() if len(segment_time) > 0 else 0
+                    time_offset += segment_duration + 0.05  # 添加小间隔防止重叠
                     
             # 创建组合数据DataFrame
             if combined_time:
+                # 确保时间数据的数值类型正确
+                combined_time = np.array(combined_time, dtype=np.float64)
+                combined_values = np.array(combined_values, dtype=np.float64)
+                
+                # 移除无效值
+                valid_mask = np.isfinite(combined_time) & np.isfinite(combined_values)
+                combined_time = combined_time[valid_mask]
+                combined_values = combined_values[valid_mask]
+                combined_filenames = [combined_filenames[i] for i in range(len(valid_mask)) if valid_mask[i]]
+                
                 self.combined_data = pd.DataFrame({
                     'relative_time': combined_time,
                     'combined_value': combined_values,
-                    'source': combined_filenames
+                    'source': combined_filenames,
+                    'time_unit': [time_unit] * len(combined_time)  # 添加时间单位信息
                 })
                 
-                # 按时间排序
+                # 按相对时间排序
                 self.combined_data = self.combined_data.sort_values('relative_time').reset_index(drop=True)
+                
+                print(f"组合数据成功: {len(self.combined_data)} 个数据点")
+                print(f"时间范围: {self.combined_data['relative_time'].min():.3f} - {self.combined_data['relative_time'].max():.3f} {time_unit}")
                 
                 return self.combined_data
             else:

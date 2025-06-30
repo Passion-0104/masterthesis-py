@@ -4,6 +4,8 @@ Plot widget for displaying data visualization in independent windows
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.ticker import FuncFormatter
 try:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -19,11 +21,21 @@ except ImportError:
         
 from matplotlib.figure import Figure
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QMainWindow, QApplication, QMessageBox, QFileDialog)
+                           QMainWindow, QApplication, QMessageBox, QFileDialog,
+                           QLabel, QLineEdit, QComboBox, QDoubleSpinBox, QCheckBox,
+                           QGroupBox, QSpinBox, QColorDialog)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QColor
 import pandas as pd
 from data_processing.slope_calculator import SlopeCalculator
+
+# 导入插值模块用于平滑曲线
+try:
+    from scipy.interpolate import interp1d, make_interp_spline
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    print("Warning: scipy not available, using linear interpolation for smoothing")
 
 
 class IndependentPlotWindow(QMainWindow):
@@ -32,28 +44,42 @@ class IndependentPlotWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.slope_calculator = SlopeCalculator()
+        
+        # 初始化垂直线设置
+        self.vertical_lines = []  # 存储添加的垂直线
+        self.vline_settings = {
+            'position': 70.0,
+            'color': '#ff0000',  # 红色
+            'linewidth': 2.0,
+            'label': 'Open the valve',
+            'enabled': False
+        }
+        
         self.setup_ui()
         
     def setup_ui(self):
         """Setup the plot window UI"""
         self.setWindowTitle("Data Visualization Chart")
-        self.setGeometry(200, 200, 1000, 700)
+        self.setGeometry(200, 200, 1200, 700)  # 稍微增加宽度以容纳右侧面板
         
         # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # Create layout
-        layout = QVBoxLayout(central_widget)
+        # Create main horizontal layout
+        main_layout = QHBoxLayout(central_widget)
+        
+        # Create left layout for chart
+        left_layout = QVBoxLayout()
         
         # Create matplotlib figure and canvas
         self.figure = Figure(figsize=(12, 8))
         self.canvas = FigureCanvas(self.figure)
         self.toolbar = NavigationToolbar(self.canvas, self)
         
-        # Add widgets to layout
-        layout.addWidget(self.toolbar)
-        layout.addWidget(self.canvas)
+        # Add widgets to left layout
+        left_layout.addWidget(self.toolbar)
+        left_layout.addWidget(self.canvas)
         
         # Create button layout
         button_layout = QHBoxLayout()
@@ -75,16 +101,437 @@ class IndependentPlotWindow(QMainWindow):
         self.close_button.clicked.connect(self.close)
         button_layout.addWidget(self.close_button)
         
-        layout.addLayout(button_layout)
+        left_layout.addLayout(button_layout)
         
+        # Add left layout to main layout
+        main_layout.addLayout(left_layout, stretch=4)  # 占主要空间
+        
+        # Create right layout for vertical line control panel
+        self._create_vertical_line_panel_right(main_layout)
+        
+    def _create_vertical_line_panel_right(self, main_layout):
+        """创建右侧小巧的垂直线控制面板"""
+        # 创建右侧面板
+        right_widget = QWidget()
+        right_widget.setMaximumWidth(250)  # 限制最大宽度
+        right_widget.setMinimumWidth(230)  # 设置最小宽度
+        right_layout = QVBoxLayout(right_widget)
+        
+        # 创建垂直线设置组框
+        vline_group = QGroupBox("垂直线标记")
+        vline_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                margin-top: 1ex;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        
+        vline_layout = QVBoxLayout(vline_group)
+        vline_layout.setSpacing(8)  # 减少间距
+        
+        # 启用复选框
+        self.enable_vline_checkbox = QCheckBox("启用标记")
+        self.enable_vline_checkbox.setChecked(self.vline_settings['enabled'])
+        self.enable_vline_checkbox.stateChanged.connect(self._on_vline_enabled_changed)
+        vline_layout.addWidget(self.enable_vline_checkbox)
+        
+        # 标签文本
+        label_layout = QVBoxLayout()
+        label_layout.addWidget(QLabel("标注文本:"))
+        self.vline_label_input = QLineEdit(self.vline_settings['label'])
+        self.vline_label_input.setMaximumHeight(25)
+        self.vline_label_input.textChanged.connect(self._on_vline_label_changed)
+        label_layout.addWidget(self.vline_label_input)
+        vline_layout.addLayout(label_layout)
+        
+        # 位置设置
+        position_layout = QVBoxLayout()
+        position_layout.addWidget(QLabel("位置 (小时):"))
+        self.vline_position_spin = QDoubleSpinBox()
+        self.vline_position_spin.setMinimum(0.0)
+        self.vline_position_spin.setMaximum(999.0)
+        self.vline_position_spin.setValue(self.vline_settings['position'])
+        self.vline_position_spin.setDecimals(1)
+        self.vline_position_spin.setMaximumHeight(25)
+        self.vline_position_spin.valueChanged.connect(self._on_vline_position_changed)
+        position_layout.addWidget(self.vline_position_spin)
+        vline_layout.addLayout(position_layout)
+        
+        # 线宽和颜色设置
+        style_layout = QHBoxLayout()
+        
+        # 线宽
+        width_layout = QVBoxLayout()
+        width_layout.addWidget(QLabel("线宽:"))
+        self.vline_width_spin = QDoubleSpinBox()
+        self.vline_width_spin.setMinimum(0.5)
+        self.vline_width_spin.setMaximum(10.0)
+        self.vline_width_spin.setValue(self.vline_settings['linewidth'])
+        self.vline_width_spin.setDecimals(1)
+        self.vline_width_spin.setSingleStep(0.5)
+        self.vline_width_spin.setMaximumWidth(70)
+        self.vline_width_spin.setMaximumHeight(25)
+        self.vline_width_spin.valueChanged.connect(self._on_vline_linewidth_changed)
+        width_layout.addWidget(self.vline_width_spin)
+        style_layout.addLayout(width_layout)
+        
+        # 颜色
+        color_layout = QVBoxLayout()
+        color_layout.addWidget(QLabel("颜色:"))
+        self.vline_color_button = QPushButton()
+        self.vline_color_button.setMaximumWidth(50)
+        self.vline_color_button.setMaximumHeight(25)
+        self._update_color_button_style()
+        self.vline_color_button.clicked.connect(self._choose_vline_color)
+        color_layout.addWidget(self.vline_color_button)
+        style_layout.addLayout(color_layout)
+        
+        vline_layout.addLayout(style_layout)
+        
+        # 应用按钮
+        self.apply_vline_button = QPushButton("应用")
+        self.apply_vline_button.clicked.connect(self._apply_vertical_line)
+        self.apply_vline_button.setEnabled(False)  # 初始禁用
+        self.apply_vline_button.setMaximumHeight(30)
+        self.apply_vline_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        vline_layout.addWidget(self.apply_vline_button)
+        
+        # 添加弹性空间
+        vline_layout.addStretch()
+        
+        # 将组框添加到右侧布局
+        right_layout.addWidget(vline_group)
+        right_layout.addStretch()  # 底部添加弹性空间
+        
+        # 将右侧面板添加到主布局
+        main_layout.addWidget(right_widget, stretch=1)  # 占较小空间
+        
+    def _update_color_button_style(self):
+        """更新颜色按钮的样式"""
+        color = self.vline_settings['color']
+        self.vline_color_button.setStyleSheet(f"background-color: {color}; border: 1px solid #ccc;")
+        
+    def _on_vline_enabled_changed(self, state):
+        """垂直线启用状态改变"""
+        self.vline_settings['enabled'] = state == Qt.Checked
+        self.apply_vline_button.setEnabled(self.vline_settings['enabled'])
+        
+    def _on_vline_label_changed(self, text):
+        """垂直线标签改变"""
+        self.vline_settings['label'] = text
+        
+    def _on_vline_position_changed(self, value):
+        """垂直线位置改变"""
+        self.vline_settings['position'] = value
+        
+    def _on_vline_linewidth_changed(self, value):
+        """垂直线线宽改变"""
+        self.vline_settings['linewidth'] = value
+        
+    def _choose_vline_color(self):
+        """选择垂直线颜色"""
+        current_color = QColor(self.vline_settings['color'])
+        color = QColorDialog.getColor(current_color, self, "选择垂直线颜色")
+        
+        if color.isValid():
+            self.vline_settings['color'] = color.name()
+            self._update_color_button_style()
+            
+    def _apply_vertical_line(self):
+        """应用垂直线到当前图表"""
+        if hasattr(self, 'figure') and hasattr(self, 'canvas'):
+            try:
+                ax = self.figure.gca()  # 获取当前轴
+                self._add_vertical_line_to_plot(ax)
+                self.canvas.draw()
+                QMessageBox.information(self, "成功", "垂直线已添加到图表中")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"添加垂直线时出错: {str(e)}")
+    
+    def _add_vertical_line_to_plot(self, ax):
+        """在图表中添加垂直线"""
+        if not self.vline_settings['enabled']:
+            return
+            
+        try:
+            # 清除之前的垂直线
+            for line in self.vertical_lines:
+                if hasattr(line, 'remove'):
+                    line.remove()
+            self.vertical_lines.clear()
+            
+            # 获取当前绘图设置（如果存在）
+            plot_settings = getattr(self, 'current_plot_settings', {})
+            is_multi_file_mode = plot_settings.get('is_multi_file_mode', False)
+            
+            # 根据时间单位调整位置
+            position = self.vline_settings['position']
+            time_unit_label = "小时"
+            
+            # 检查是否为多文件模式且有时间单位信息
+            if is_multi_file_mode and hasattr(self, 'current_plot_data'):
+                plot_df = self.current_plot_data
+                if 'time_unit' in plot_df.columns and len(plot_df) > 0:
+                    time_unit = plot_df['time_unit'].iloc[0]
+                    if time_unit == 'minutes':
+                        time_unit_label = "分钟"
+                        # 如果当前图表使用分钟单位，但设置是小时，需要转换
+                        # 这里position默认按小时设置，需要转换为分钟
+                        position = position * 60  # 小时转分钟
+            
+            color = self.vline_settings['color']
+            linewidth = self.vline_settings['linewidth']
+            label = self.vline_settings['label']
+            
+            # 绘制垂直虚线
+            vline = ax.axvline(x=position, color=color, linestyle='--', 
+                             linewidth=linewidth, alpha=0.8, zorder=10)
+            self.vertical_lines.append(vline)
+            
+            # 添加文本标注
+            ylim = ax.get_ylim()
+            text_y = ylim[1] * 0.95  # 在图的顶部95%位置
+            
+            # 添加时间单位到标签
+            label_with_unit = f"{label}\n({position:.1f} {time_unit_label})"
+            
+            text = ax.text(position, text_y, label_with_unit, 
+                         horizontalalignment='center', verticalalignment='top',
+                         fontsize=10, fontweight='bold', color=color,
+                         bbox=dict(boxstyle='round,pad=0.4', facecolor='white', 
+                                 edgecolor=color, alpha=0.9),
+                         zorder=11)
+            
+            # 将文本也添加到垂直线列表中以便清理
+            self.vertical_lines.append(text)
+            
+        except Exception as e:
+            print(f"绘制垂直线时出错: {e}")
+    
+    def _create_smooth_curve(self, x_data, y_data, smooth_factor=300):
+        """创建平滑曲线数据"""
+        try:
+            # 确保数据是排序的
+            sorted_indices = np.argsort(x_data)
+            x_sorted = x_data[sorted_indices]
+            y_sorted = y_data[sorted_indices]
+            
+            # 移除重复的x值
+            unique_mask = np.diff(x_sorted, prepend=x_sorted[0] - 1) != 0
+            x_unique = x_sorted[unique_mask]
+            y_unique = y_sorted[unique_mask]
+            
+            if len(x_unique) < 3:
+                # 数据点太少，返回原始数据
+                return x_unique, y_unique
+            
+            # 创建更密集的x点用于平滑
+            x_smooth = np.linspace(x_unique.min(), x_unique.max(), smooth_factor)
+            
+            if SCIPY_AVAILABLE:
+                # 使用样条插值创建平滑曲线
+                if len(x_unique) >= 4:
+                    # 使用三次样条插值
+                    try:
+                        spline = make_interp_spline(x_unique, y_unique, k=3)
+                        y_smooth = spline(x_smooth)
+                    except:
+                        # 如果三次样条失败，使用线性插值
+                        interp_func = interp1d(x_unique, y_unique, kind='linear', 
+                                             bounds_error=False, fill_value='extrapolate')
+                        y_smooth = interp_func(x_smooth)
+                else:
+                    # 数据点太少，使用线性插值
+                    interp_func = interp1d(x_unique, y_unique, kind='linear',
+                                         bounds_error=False, fill_value='extrapolate')
+                    y_smooth = interp_func(x_smooth)
+            else:
+                # 没有scipy，使用numpy的线性插值
+                y_smooth = np.interp(x_smooth, x_unique, y_unique)
+            
+            return x_smooth, y_smooth
+            
+        except Exception as e:
+            print(f"创建平滑曲线时出错: {e}")
+            # 返回原始数据
+            return x_data, y_data
+    
+    def _format_time_axis(self, ax, time_unit='hours'):
+        """格式化时间轴显示"""
+        try:
+            if time_unit == 'minutes':
+                # 分钟格式化函数
+                def minutes_formatter(x, pos):
+                    """将数值转换为时间格式"""
+                    total_minutes = int(x)
+                    hours = total_minutes // 60
+                    minutes = total_minutes % 60
+                    
+                    if hours > 0:
+                        return f"{hours}h{minutes:02d}m"
+                    else:
+                        return f"{minutes}m"
+                
+                # 应用格式化
+                ax.xaxis.set_major_formatter(FuncFormatter(minutes_formatter))
+                
+                # 设置智能刻度
+                x_min, x_max = ax.get_xlim()
+                if x_max <= 120:  # 2小时以内
+                    tick_interval = 15  # 每15分钟
+                elif x_max <= 300:  # 5小时以内
+                    tick_interval = 30  # 每30分钟
+                else:
+                    tick_interval = 60  # 每1小时
+                    
+                ticks = np.arange(0, x_max + tick_interval, tick_interval)
+                ticks = ticks[ticks <= x_max]
+                if len(ticks) > 0:
+                    ax.set_xticks(ticks)
+                
+            else:  # hours
+                # 小时格式化函数
+                def hours_formatter(x, pos):
+                    """将数值转换为时间格式"""
+                    if x == 0:
+                        return "0h"
+                    
+                    total_hours = float(x)
+                    hours = int(total_hours)
+                    minutes = int((total_hours - hours) * 60)
+                    
+                    if hours > 0:
+                        if minutes > 0:
+                            return f"{hours}h{minutes:02d}m"
+                        else:
+                            return f"{hours}h"
+                    else:
+                        if minutes > 0:
+                            return f"{minutes}m"
+                        else:
+                            return "0h"
+                
+                # 应用格式化
+                ax.xaxis.set_major_formatter(FuncFormatter(hours_formatter))
+                
+                # 设置智能刻度 - 针对长数据优化
+                x_min, x_max = ax.get_xlim()
+                print(f"Debug: x轴范围: {x_min:.3f} - {x_max:.3f} 小时")
+                
+                # 更智能的刻度设置，确保长数据也能正确显示
+                if x_max <= 2:  # 2小时以内
+                    tick_interval = 0.25  # 每15分钟
+                    max_ticks = 10
+                elif x_max <= 5:  # 5小时以内
+                    tick_interval = 0.5   # 每30分钟
+                    max_ticks = 12
+                elif x_max <= 12:  # 12小时以内
+                    tick_interval = 1     # 每1小时
+                    max_ticks = 15
+                elif x_max <= 24:  # 24小时以内
+                    tick_interval = 2     # 每2小时
+                    max_ticks = 15
+                elif x_max <= 48:  # 48小时以内
+                    tick_interval = 4     # 每4小时
+                    max_ticks = 15
+                elif x_max <= 72:  # 72小时以内
+                    tick_interval = 6     # 每6小时
+                    max_ticks = 15
+                elif x_max <= 168:  # 1周以内
+                    tick_interval = 12    # 每12小时
+                    max_ticks = 15
+                else:  # 超过1周的数据
+                    tick_interval = 24    # 每24小时
+                    max_ticks = 15
+                    
+                # 生成刻度
+                ticks = np.arange(0, x_max + tick_interval, tick_interval)
+                ticks = ticks[ticks <= x_max]
+                
+                # 如果刻度太多，减少数量
+                if len(ticks) > max_ticks:
+                    # 使用更稀疏的刻度
+                    step = len(ticks) // max_ticks + 1
+                    ticks = ticks[::step]
+                
+                # 确保始终包含起点和终点
+                if len(ticks) > 0:
+                    if ticks[0] > 0:
+                        ticks = np.insert(ticks, 0, 0)
+                    if ticks[-1] < x_max * 0.95:  # 如果最后一个刻度离结束太远
+                        ticks = np.append(ticks, x_max)
+                
+                # 确保至少有几个刻度
+                if len(ticks) < 3:
+                    num_ticks = min(8, max(3, int(x_max) + 1))
+                    ticks = np.linspace(0, x_max, num_ticks)
+                
+                print(f"Debug: 设置刻度数量: {len(ticks)}, 刻度值: {ticks}")
+                
+                # 强制设置刻度
+                if len(ticks) > 0:
+                    ax.set_xticks(ticks)
+                    # 强制显示所有标签
+                    ax.tick_params(axis='x', which='major', labelsize=9)
+                    
+                    # 禁用matplotlib的自动标签隐藏
+                    ax.xaxis.set_tick_params(which='major', pad=5)
+                    
+                    # 对于长数据，使用更大的旋转角度避免重叠
+                    if x_max > 24:
+                        rotation_angle = 60
+                    elif x_max > 12:
+                        rotation_angle = 45
+                    else:
+                        rotation_angle = 30
+                    
+                    ax.tick_params(axis='x', rotation=rotation_angle, labelsize=9)
+            
+            # 确保x轴标签可见
+            plt.setp(ax.xaxis.get_majorticklabels(), visible=True)
+            
+            # 强制更新图形
+            ax.figure.canvas.draw_idle()
+            
+        except Exception as e:
+            print(f"格式化时间轴时出错: {e}")
+            # 如果格式化失败，使用默认格式
+            ax.ticklabel_format(style='plain', axis='x')
+     
     def plot_data(self, data, selected_columns, plot_settings):
         """Plot data in the independent window"""
         try:
+            # 存储当前绘图设置和数据供垂直线功能使用
+            self.current_plot_settings = plot_settings
+            self.current_plot_data = data
+            
             self.figure.clear()
             ax = self.figure.add_subplot(111)
             
             # Configure matplotlib for academic paper standards
-            plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica']
+            plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Helvetica', 'sans-serif']
             plt.rcParams['mathtext.fontset'] = 'dejavusans'
             plt.rcParams['axes.unicode_minus'] = False
             plt.rcParams['font.size'] = 10  # Academic standard base font size
@@ -126,14 +573,26 @@ class IndependentPlotWindow(QMainWindow):
                                 source_data = plot_df[plot_df['source'] == source][['relative_time', 'combined_value']].dropna()
                                 if not source_data.empty:
                                     color_idx = i % len(colors)
-                                    ax.plot(source_data['relative_time'], source_data['combined_value'],
+                                    
+                                    # 创建平滑曲线
+                                    x_smooth, y_smooth = self._create_smooth_curve(
+                                        source_data['relative_time'].values, 
+                                        source_data['combined_value'].values
+                                    )
+                                    
+                                    ax.plot(x_smooth, y_smooth,
                                           '-', color=colors[color_idx], label=source,
-                                          linewidth=2.0)
+                                          linewidth=2.5, alpha=0.9)
                         else:
                             # 没有source列，绘制整体数据
-                            ax.plot(valid_data['relative_time'], valid_data['combined_value'],
+                            x_smooth, y_smooth = self._create_smooth_curve(
+                                valid_data['relative_time'].values, 
+                                valid_data['combined_value'].values
+                            )
+                            
+                            ax.plot(x_smooth, y_smooth,
                                   '-', color=colors[0], label="组合数据",
-                                  linewidth=2.0)
+                                  linewidth=2.5, alpha=0.9)
             else:
                 # 单文件模式：原有逻辑
                 for i, col in enumerate(selected_columns):
@@ -150,7 +609,13 @@ class IndependentPlotWindow(QMainWindow):
                         if show_original:
                             valid_data = plot_df[['relative_time', col]].dropna()
                             if not valid_data.empty:
-                                ax.plot(valid_data['relative_time'], valid_data[col],
+                                # 创建平滑曲线
+                                x_smooth, y_smooth = self._create_smooth_curve(
+                                    valid_data['relative_time'].values, 
+                                    valid_data[col].values
+                                )
+                                
+                                ax.plot(x_smooth, y_smooth,
                                       '-', color=colors[color_idx],
                                       label=f"{col} (original)",
                                       linewidth=2.0, alpha=0.7)
@@ -162,10 +627,15 @@ class IndependentPlotWindow(QMainWindow):
                             values = calibrated_data[calib_col]['values']
                             
                             calib_color = calib_colors[color_idx % len(calib_colors)]
-                            ax.plot(times, values, '--', color=calib_color,
+                            
+                            # 创建校准数据的平滑曲线
+                            x_smooth, y_smooth = self._create_smooth_curve(
+                                np.array(times), np.array(values)
+                            )
+                            
+                            ax.plot(x_smooth, y_smooth, '--', color=calib_color,
                                   label=f"{col} (calibrated)",
-                                  linewidth=2.5, marker='o', markersize=2,
-                                  markevery=len(times)//20)
+                                  linewidth=2.5, alpha=0.9)
                             
                             # Add error range if requested
                             if show_error:
@@ -178,12 +648,24 @@ class IndependentPlotWindow(QMainWindow):
                         # Plot regular data
                         valid_data = plot_df[['relative_time', col]].dropna()
                         if not valid_data.empty:
-                            ax.plot(valid_data['relative_time'], valid_data[col],
+                            # 创建平滑曲线
+                            x_smooth, y_smooth = self._create_smooth_curve(
+                                valid_data['relative_time'].values, 
+                                valid_data[col].values
+                            )
+                            
+                            ax.plot(x_smooth, y_smooth,
                                   '-', color=colors[color_idx], label=col,
-                                  linewidth=2.0)
+                                  linewidth=2.5, alpha=0.9)
             
             # Set labels and title - academic paper standards
-            ax.set_xlabel("Time (hours)", fontsize=11, fontweight='normal')
+            # 根据时间单位设置x轴标签
+            if is_multi_file_mode and 'time_unit' in plot_df.columns:
+                time_unit = plot_df['time_unit'].iloc[0] if len(plot_df) > 0 else 'hours'
+                ax.set_xlabel("Time", fontsize=11, fontweight='normal')
+            else:
+                time_unit = 'hours'  # 默认单位
+                ax.set_xlabel("Time", fontsize=11, fontweight='normal')
             
             # Use custom Y-axis label if provided, otherwise use default
             custom_ylabel = plot_settings.get('custom_ylabel', 'Water Concentration (ppm)')
@@ -195,6 +677,15 @@ class IndependentPlotWindow(QMainWindow):
             legend = ax.legend(loc='best', frameon=True, fontsize=9, markerscale=1.5)
             for line in legend.get_lines():
                 line.set_linewidth(2.0)
+            
+            # Store legend reference for updates
+            self.current_legend = legend
+            
+            # Enable legend editing
+            legend.set_picker(True)
+            
+            # Add legend update functionality
+            self._setup_legend_editing(ax)
             
             # Set grid
             ax.grid(True, linestyle='--', alpha=0.7)
@@ -247,6 +738,30 @@ class IndependentPlotWindow(QMainWindow):
                           horizontalalignment='center', verticalalignment='bottom',
                           fontsize=10, fontweight='normal', color='orange')
             
+            # 添加用户自定义的垂直线标记
+            self._add_vertical_line_to_plot(ax)
+            
+            # 应用时间格式化（在所有绘图完成后）
+            # 检查是否需要使用预设的2小时标签
+            time_range_setting = plot_settings.get('time_range', 0)
+            use_custom_labels = False
+            
+            # 只有在明确设置了2小时范围且数据确实在2小时以内时才使用预设标签
+            if time_range_setting == 1 and not plot_df.empty:
+                max_time = plot_df['relative_time'].max()
+                if max_time <= 2.5:  # 给一点容差
+                    use_custom_labels = True
+                    print("Debug: 使用2小时范围预设标签")
+            
+            if not use_custom_labels:
+                # 应用自动时间格式化 - 对所有其他情况
+                print(f"Debug: 应用自动时间格式化，时间单位: {time_unit}, time_range_setting: {time_range_setting}")
+                self._format_time_axis(ax, time_unit)
+            else:
+                # 即使使用预设标签，也要确保标签可见
+                ax.tick_params(axis='x', rotation=0, labelsize=10)
+                plt.setp(ax.xaxis.get_majorticklabels(), visible=True)
+            
             plt.tight_layout()
             self.canvas.draw()
             
@@ -261,6 +776,178 @@ class IndependentPlotWindow(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Plot Error", f"Error creating plot: {str(e)}")
+    
+    def _setup_legend_editing(self, ax):
+        """Setup legend editing functionality"""
+        try:
+            # Store axis reference
+            self.current_ax = ax
+            
+            # Connect canvas event to legend update
+            self.canvas.mpl_connect('button_release_event', self._on_canvas_click)
+            
+            # Connect to draw event to update legend after matplotlib operations
+            self.canvas.mpl_connect('draw_event', self._check_legend_update)
+            
+        except Exception as e:
+            print(f"Warning: Could not setup legend editing: {e}")
+    
+    def _on_canvas_click(self, event):
+        """Handle canvas click events"""
+        try:
+            # Check if we need to update legend after user interaction
+            if hasattr(self, 'current_ax'):
+                # Small delay to allow matplotlib to process the event
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100, self._update_legend_if_needed)
+        except Exception as e:
+            print(f"Debug: Canvas click event error: {e}")
+    
+    def _check_legend_update(self, event):
+        """Check if legend needs to be updated after drawing"""
+        try:
+            self._update_legend_if_needed()
+        except Exception as e:
+            print(f"Debug: Legend update check error: {e}")
+    
+    def _update_legend_if_needed(self):
+        """Update legend if line labels have changed"""
+        try:
+            if not hasattr(self, 'current_ax') or not hasattr(self, 'current_legend'):
+                return
+            
+            ax = self.current_ax
+            
+            # Get current line labels
+            current_labels = []
+            for line in ax.get_lines():
+                label = line.get_label()
+                if label and not label.startswith('_'):  # Skip hidden lines
+                    current_labels.append(label)
+            
+            # Get legend labels
+            if self.current_legend:
+                legend_labels = [text.get_text() for text in self.current_legend.get_texts()]
+                
+                # Check if labels have changed
+                if current_labels != legend_labels:
+                    print(f"Debug: Updating legend - old: {legend_labels}, new: {current_labels}")
+                    self._refresh_legend(ax)
+                    
+        except Exception as e:
+            print(f"Debug: Legend update error: {e}")
+    
+    def _refresh_legend(self, ax):
+        """Refresh the legend with current line labels"""
+        try:
+            # Remove old legend
+            if hasattr(self, 'current_legend') and self.current_legend:
+                self.current_legend.remove()
+            
+            # Create new legend with updated labels
+            legend = ax.legend(loc='best', frameon=True, fontsize=9, markerscale=1.5)
+            for line in legend.get_lines():
+                line.set_linewidth(2.0)
+            
+            # Store new legend reference
+            self.current_legend = legend
+            legend.set_picker(True)
+            
+            # Redraw canvas
+            self.canvas.draw_idle()
+            
+            print("Debug: Legend refreshed successfully")
+            
+        except Exception as e:
+            print(f"Debug: Legend refresh error: {e}")
+    
+    def _setup_slope_legend_editing(self, canvas, ax, legend):
+        """Setup legend editing functionality for slope charts"""
+        try:
+            # Store references
+            canvas.current_ax = ax
+            canvas.current_legend = legend
+            
+            # Enable legend editing
+            legend.set_picker(True)
+            
+            # Connect canvas events
+            canvas.mpl_connect('button_release_event', 
+                             lambda event: self._on_slope_canvas_click(event, canvas))
+            canvas.mpl_connect('draw_event', 
+                             lambda event: self._check_slope_legend_update(event, canvas))
+            
+        except Exception as e:
+            print(f"Warning: Could not setup slope legend editing: {e}")
+    
+    def _on_slope_canvas_click(self, event, canvas):
+        """Handle canvas click events for slope charts"""
+        try:
+            # Check if we need to update legend after user interaction
+            if hasattr(canvas, 'current_ax'):
+                # Small delay to allow matplotlib to process the event
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(100, lambda: self._update_slope_legend_if_needed(canvas))
+        except Exception as e:
+            print(f"Debug: Slope canvas click event error: {e}")
+    
+    def _check_slope_legend_update(self, event, canvas):
+        """Check if slope legend needs to be updated after drawing"""
+        try:
+            self._update_slope_legend_if_needed(canvas)
+        except Exception as e:
+            print(f"Debug: Slope legend update check error: {e}")
+    
+    def _update_slope_legend_if_needed(self, canvas):
+        """Update slope legend if line labels have changed"""
+        try:
+            if not hasattr(canvas, 'current_ax') or not hasattr(canvas, 'current_legend'):
+                return
+            
+            ax = canvas.current_ax
+            
+            # Get current line labels
+            current_labels = []
+            for line in ax.get_lines():
+                label = line.get_label()
+                if label and not label.startswith('_'):  # Skip hidden lines
+                    current_labels.append(label)
+            
+            # Get legend labels
+            if canvas.current_legend:
+                legend_labels = [text.get_text() for text in canvas.current_legend.get_texts()]
+                
+                # Check if labels have changed
+                if current_labels != legend_labels:
+                    print(f"Debug: Updating slope legend - old: {legend_labels}, new: {current_labels}")
+                    self._refresh_slope_legend(canvas, ax)
+                    
+        except Exception as e:
+            print(f"Debug: Slope legend update error: {e}")
+    
+    def _refresh_slope_legend(self, canvas, ax):
+        """Refresh the slope legend with current line labels"""
+        try:
+            # Remove old legend
+            if hasattr(canvas, 'current_legend') and canvas.current_legend:
+                canvas.current_legend.remove()
+            
+            # Create new legend with updated labels
+            legend = ax.legend(loc='best', frameon=False, fontsize=10)
+            for text in legend.get_texts():
+                text.set_fontfamily('serif')
+            
+            # Store new legend reference
+            canvas.current_legend = legend
+            legend.set_picker(True)
+            
+            # Redraw canvas
+            canvas.draw_idle()
+            
+            print("Debug: Slope legend refreshed successfully")
+            
+        except Exception as e:
+            print(f"Debug: Slope legend refresh error: {e}")
             
     def _apply_time_filter(self, data, plot_settings):
         """Apply time range filtering to data"""
@@ -273,8 +960,11 @@ class IndependentPlotWindow(QMainWindow):
             if pd.api.types.is_numeric_dtype(relative_time_col) and not relative_time_col.isna().all():
                 max_time = relative_time_col.max()
                 min_time = relative_time_col.min()
-                # If it looks like valid relative time (hours), use it
-                if max_time > min_time and max_time <= 24:  # reasonable hour range
+                # Check if it's valid relative time (non-negative, reasonable range)
+                if (max_time >= min_time and 
+                    min_time >= 0 and 
+                    max_time <= 8760 and  # Up to 1 year in hours
+                    np.isfinite(max_time) and np.isfinite(min_time)):
                     print(f"Debug: Using existing relative_time column, range: {min_time:.3f} - {max_time:.3f}h")
                     # Apply time range filter and return
                     time_range = plot_settings.get('time_range', 0)
@@ -290,18 +980,39 @@ class IndependentPlotWindow(QMainWindow):
         # Convert time column to relative time if needed
         time_col = plot_settings.get('time_column')
         if time_col and time_col in plot_df.columns:
-            print(f"Debug: Converting time column {time_col} to relative_time")
-            plot_df[time_col] = pd.to_datetime(plot_df[time_col], errors='coerce')
-            plot_df = plot_df.dropna(subset=[time_col])
-            
-            # Calculate relative time
-            if not plot_df.empty:
-                start_time = plot_df[time_col].min()
-                plot_df['relative_time'] = (plot_df[time_col] - start_time).dt.total_seconds() / 3600
-                print(f"Debug: Converted to relative_time, range: {plot_df['relative_time'].min():.3f} - {plot_df['relative_time'].max():.3f}h")
+            # Check if the time column is already relative_time (avoid reprocessing)
+            if time_col == 'relative_time':
+                print(f"Debug: Time column is already relative_time, skipping conversion")
+                # No need to convert, just validate and use
+                if 'relative_time' not in plot_df.columns:
+                    plot_df['relative_time'] = np.arange(len(plot_df)) / 60.0
             else:
-                plot_df['relative_time'] = 0
-                print("Debug: Empty dataframe after time conversion")
+                print(f"Debug: Converting time column {time_col} to relative_time")
+                try:
+                    original_col = plot_df[time_col].copy()
+                    plot_df[time_col] = pd.to_datetime(plot_df[time_col], errors='coerce')
+                    valid_datetime_data = plot_df.dropna(subset=[time_col])
+                    
+                    # Calculate relative time
+                    if not valid_datetime_data.empty:
+                        start_time = valid_datetime_data[time_col].min()
+                        plot_df['relative_time'] = (plot_df[time_col] - start_time).dt.total_seconds() / 3600
+                        print(f"Debug: Converted to relative_time, range: {plot_df['relative_time'].min():.3f} - {plot_df['relative_time'].max():.3f}h")
+                    else:
+                        print("Debug: Failed to convert datetime, using original data as relative time")
+                        # Fallback: try to use original data as numeric time
+                        original_numeric = pd.to_numeric(original_col, errors='coerce')
+                        if not original_numeric.isna().all():
+                            plot_df['relative_time'] = original_numeric
+                            print(f"Debug: Used original numeric data as relative_time, range: {plot_df['relative_time'].min():.3f} - {plot_df['relative_time'].max():.3f}h")
+                        else:
+                            plot_df['relative_time'] = np.arange(len(plot_df)) / 60.0
+                            print("Debug: Created dummy relative_time due to conversion failure")
+                except Exception as e:
+                    print(f"Debug: Error converting time column: {e}")
+                    # Create dummy time if conversion fails
+                    plot_df['relative_time'] = np.arange(len(plot_df)) / 60.0
+                    print(f"Debug: Created dummy relative_time due to exception, range: {plot_df['relative_time'].min():.3f} - {plot_df['relative_time'].max():.3f}h")
         else:
             # Create dummy relative time if no time column
             plot_df['relative_time'] = np.arange(len(plot_df)) / 60.0  # Assume 1 minute intervals
@@ -948,7 +1659,7 @@ class IndependentPlotWindow(QMainWindow):
             ax = figure.add_subplot(111)
             
             # 配置matplotlib
-            plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Liberation Sans', 'Helvetica']
+            plt.rcParams['font.family'] = ['Arial', 'DejaVu Sans', 'Helvetica', 'sans-serif']
             plt.rcParams['font.size'] = 10
             
             colors = plt.cm.tab10.colors
@@ -979,6 +1690,9 @@ class IndependentPlotWindow(QMainWindow):
             legend = ax.legend(loc='best', frameon=False, fontsize=10)
             for text in legend.get_texts():
                 text.set_fontfamily('serif')
+            
+            # Store legend reference and setup editing for slope chart
+            self._setup_slope_legend_editing(canvas, ax, legend)
             
             # Clean grid for academic papers
             ax.grid(True, linestyle='-', alpha=0.2, linewidth=0.5)

@@ -111,6 +111,22 @@ class MultiFileDialog(QDialog):
         instruction_label.setFont(QFont("Arial", 10))
         config_layout.addWidget(instruction_label)
         
+        # 时间单位选项
+        time_unit_layout = QHBoxLayout()
+        time_unit_label = QLabel("时间显示单位：")
+        time_unit_label.setFont(QFont("Arial", 10))
+        time_unit_layout.addWidget(time_unit_label)
+        
+        self.time_unit_combo = QComboBox()
+        self.time_unit_combo.setFont(QFont("Arial", 10))
+        self.time_unit_combo.addItem("小时 (h)", "hours")
+        self.time_unit_combo.addItem("分钟 (min)", "minutes")
+        self.time_unit_combo.setToolTip("选择横坐标时间的显示单位")
+        time_unit_layout.addWidget(self.time_unit_combo)
+        
+        time_unit_layout.addStretch()
+        config_layout.addLayout(time_unit_layout)
+        
         # 添加数据段按钮和刷新按钮
         button_row = QHBoxLayout()
         
@@ -585,7 +601,8 @@ class MultiFileDialog(QDialog):
         try:
             segments_config = self.get_segments_config()
             if segments_config:
-                return self.multi_file_loader.combine_data_segments(segments_config)
+                time_unit = self.time_unit_combo.currentData()  # "hours" 或 "minutes"
+                return self.multi_file_loader.combine_data_segments(segments_config, time_unit)
             return None
         except Exception as e:
             raise e 
