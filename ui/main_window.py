@@ -19,6 +19,8 @@ from data_processing.slope_calculator import SlopeCalculator
 from calibration.calibration_core import CalibrationCore
 from calibration.parameter_manager import ParameterManager
 from ui.plot_widget import IndependentPlotWindow
+from ui.multi_file_dialog import MultiFileDialog
+from data_processing.multi_file_loader import MultiFileLoader
 from utils.file_utils import FileUtils
 
 
@@ -28,10 +30,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.data_loader = DataLoader()
+        self.multi_file_loader = MultiFileLoader()
         self.slope_calculator = SlopeCalculator()
         self.calibration_core = CalibrationCore()
         self.parameter_manager = ParameterManager()
         self.plot_windows = []  # Track opened plot windows
+        self.is_multi_file_mode = False  # 是否为多文件模式
         
         self.setup_ui()
         self.setup_connections()
@@ -89,21 +93,34 @@ class MainWindow(QMainWindow):
         
     def create_file_section(self, parent_layout):
         """Create file selection section"""
-        file_group = QGroupBox("File Selection")
+        file_group = QGroupBox("文件选择")
         file_group.setFont(QFont("Arial", 12))  # Academic standard size
-        file_layout = QHBoxLayout(file_group)
+        file_layout = QVBoxLayout(file_group)
         file_layout.setSpacing(10)
         file_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.file_button = QPushButton("Select Excel File")
+        # 按钮行
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        
+        self.file_button = QPushButton("选择单个Excel文件")
         self.file_button.setFont(QFont("Arial", 11))
         self.file_button.setMinimumHeight(32)
         
-        self.file_label = QLabel("No file selected")
-        self.file_label.setFont(QFont("Arial", 11))
+        self.multi_file_button = QPushButton("选择多个Excel文件组合")
+        self.multi_file_button.setFont(QFont("Arial", 11))
+        self.multi_file_button.setMinimumHeight(32)
         
-        file_layout.addWidget(self.file_button)
-        file_layout.addWidget(self.file_label, 1)
+        button_layout.addWidget(self.file_button)
+        button_layout.addWidget(self.multi_file_button)
+        button_layout.addStretch()
+        
+        file_layout.addLayout(button_layout)
+        
+        # 文件信息标签
+        self.file_label = QLabel("未选择文件")
+        self.file_label.setFont(QFont("Arial", 11))
+        file_layout.addWidget(self.file_label)
         
         parent_layout.addWidget(file_group)
         
@@ -515,38 +532,61 @@ class MainWindow(QMainWindow):
         """Create chart settings section"""
         chart_group = QGroupBox("图表设置")
         chart_group.setFont(QFont("Arial", 12))
-        chart_layout = QHBoxLayout(chart_group)
+        chart_layout = QVBoxLayout(chart_group)
         chart_layout.setSpacing(10)
         chart_layout.setContentsMargins(10, 10, 10, 10)
         
-        # Y-axis label setting
+        # Y-axis label setting row
+        ylabel_row = QHBoxLayout()
+        ylabel_row.setSpacing(10)
+        
         ylabel_label = QLabel("纵坐标标签:")
         ylabel_label.setFont(QFont("Arial", 11))
-        chart_layout.addWidget(ylabel_label)
+        ylabel_row.addWidget(ylabel_label)
         
-        # Create input field for custom y-axis label
+        # Create combo box for y-axis label options
+        self.ylabel_combo = QComboBox()
+        self.ylabel_combo.setFont(QFont("Arial", 10))
+        self.ylabel_combo.setMinimumHeight(28)
+        self.ylabel_combo.setMaximumWidth(300)
+        
+        # Add predefined options
+        ylabel_options = [
+            ("Water Concentration (ppm)", "Water Concentration (ppm)"),
+            ("Temperature (°C)", "Temperature (°C)"),
+            ("Moisture Concentration (ppm)", "Moisture Concentration (ppm)"),
+            ("Pressure (bar)", "Pressure (bar)"),
+            ("自定义", "")
+        ]
+        
+        for display_text, value in ylabel_options:
+            self.ylabel_combo.addItem(display_text, value)
+        
+        self.ylabel_combo.setCurrentIndex(0)  # Default to water concentration
+        self.ylabel_combo.currentTextChanged.connect(self.on_ylabel_combo_changed)
+        ylabel_row.addWidget(self.ylabel_combo)
+        
+        # Custom input field (initially hidden)
         self.ylabel_input = QLineEdit()
         self.ylabel_input.setFont(QFont("Arial", 10))
-        self.ylabel_input.setPlaceholderText("输入自定义纵坐标标签，例如：水浓度 (ppm)")
-        self.ylabel_input.setText("Water Concentration (ppm)")  # Default value
+        self.ylabel_input.setPlaceholderText("输入自定义纵坐标标签")
         self.ylabel_input.setMinimumHeight(28)
-        self.ylabel_input.setMaximumWidth(400)
-        chart_layout.addWidget(self.ylabel_input, 1)
+        self.ylabel_input.setMaximumWidth(300)
+        self.ylabel_input.setVisible(False)
+        ylabel_row.addWidget(self.ylabel_input)
         
-        # Reset button
-        reset_ylabel_btn = QPushButton("重置为默认")
-        reset_ylabel_btn.setFont(QFont("Arial", 10))
-        reset_ylabel_btn.setMinimumHeight(28)
-        reset_ylabel_btn.clicked.connect(self.reset_ylabel_to_default)
-        chart_layout.addWidget(reset_ylabel_btn)
-        
-        chart_layout.addStretch()
+        ylabel_row.addStretch()
+        chart_layout.addLayout(ylabel_row)
         
         parent_layout.addWidget(chart_group)
         
-    def reset_ylabel_to_default(self):
-        """Reset Y-axis label to default value"""
-        self.ylabel_input.setText("Water Concentration (ppm)")
+    def on_ylabel_combo_changed(self):
+        """处理纵坐标标签下拉框变化"""
+        if self.ylabel_combo.currentText() == "自定义":
+            self.ylabel_input.setVisible(True)
+            self.ylabel_input.setFocus()
+        else:
+            self.ylabel_input.setVisible(False)
         
     def create_action_section(self, parent_layout):
         """Create action buttons section"""
@@ -576,6 +616,7 @@ class MainWindow(QMainWindow):
         """Setup signal connections"""
         # File operations
         self.file_button.clicked.connect(self.select_file)
+        self.multi_file_button.clicked.connect(self.select_multi_files)
         
         # Column operations
         self.clear_selection_btn.clicked.connect(self.clear_column_selection)
@@ -636,6 +677,10 @@ class MainWindow(QMainWindow):
                 # Load file
                 data = self.data_loader.load_file(file_path)
                 
+                # Reset multi-file mode
+                self.is_multi_file_mode = False
+                self.multi_file_loader = MultiFileLoader()
+                
                 # Update UI
                 self.file_label.setText(os.path.basename(file_path))
                 self.update_column_lists()
@@ -648,6 +693,35 @@ class MainWindow(QMainWindow):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
+                
+    def select_multi_files(self):
+        """选择多个Excel文件进行数据组合"""
+        dialog = MultiFileDialog(self)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            try:
+                # 获取组合数据
+                combined_data = dialog.get_combined_data()
+                
+                if combined_data is not None:
+                    # 更新数据加载器
+                    self.multi_file_loader = dialog.get_multi_file_loader()
+                    self.is_multi_file_mode = True
+                    
+                    # 更新UI显示
+                    files_count = self.multi_file_loader.get_file_count()
+                    self.file_label.setText(f"已加载 {files_count} 个文件进行组合")
+                    
+                    # 更新列选择（多文件模式下显示组合列）
+                    self.update_multi_file_column_list()
+                    self.set_controls_enabled(True)
+                    
+                    QMessageBox.information(self, "成功", "多文件数据组合成功！")
+                else:
+                    QMessageBox.warning(self, "警告", "没有生成组合数据")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"多文件组合失败: {str(e)}")
                 
     def update_column_lists(self):
         """Update all column lists and combos"""
@@ -678,6 +752,22 @@ class MainWindow(QMainWindow):
             self.time_column_combo.setCurrentText(time_columns[0])
         elif columns:
             self.time_column_combo.setCurrentText(columns[0])
+            
+    def update_multi_file_column_list(self):
+        """更新多文件模式下的列选择"""
+        self.column_list.clear()
+        
+        # 在多文件模式下，显示组合后的数据列
+        combined_columns = ["combined_value"]  # 组合数据的主要列
+        self.column_list.addItems(combined_columns)
+        
+        # 默认选择组合列
+        self.column_list.setCurrentRow(0)
+        
+        # 更新时间列下拉框
+        self.time_column_combo.clear()
+        self.time_column_combo.addItems(["relative_time"])
+        self.time_column_combo.setCurrentText("relative_time")
             
     def clear_column_selection(self):
         """Clear column selection"""
@@ -902,30 +992,50 @@ class MainWindow(QMainWindow):
                     
     def generate_chart(self):
         """Generate and display chart"""
-        if not self.data_loader.is_data_loaded():
-            QMessageBox.warning(self, "Warning", "Please load a file first")
-            return
-            
-        # Get selected columns
-        selected_items = self.column_list.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "Warning", "Please select columns to plot")
-            return
-            
-        selected_columns = [item.text() for item in selected_items]
-        
-        # Get time column
-        time_column = self.time_column_combo.currentText()
-        if not time_column:
-            QMessageBox.warning(self, "Warning", "Please select a time column")
-            return
-            
         try:
+            # 检查数据模式
+            if self.is_multi_file_mode:
+                # 多文件模式
+                if not self.multi_file_loader.is_data_loaded():
+                    QMessageBox.warning(self, "Warning", "请先选择并配置多个Excel文件!")
+                    return
+                    
+                # 获取组合数据
+                combined_data = self.multi_file_loader.get_combined_data()
+                if combined_data is None or combined_data.empty:
+                    QMessageBox.warning(self, "Warning", "没有可用的组合数据!")
+                    return
+                    
+                # 对于多文件模式，使用固定的列名
+                selected_columns = ["combined_value"]
+                data = combined_data
+                
+            else:
+                # 单文件模式
+                if not self.data_loader.is_data_loaded():
+                    QMessageBox.warning(self, "Warning", "Please load a file first")
+                    return
+                    
+                # Get selected columns
+                selected_items = self.column_list.selectedItems()
+                if not selected_items:
+                    QMessageBox.warning(self, "Warning", "Please select columns to plot")
+                    return
+                    
+                selected_columns = [item.text() for item in selected_items]
+                
+                # Get time column
+                time_column = self.time_column_combo.currentText()
+                if not time_column:
+                    QMessageBox.warning(self, "Warning", "Please select a time column")
+                    return
+                    
+                # Get data
+                data = self.data_loader.data
+                
             # Prepare plot settings
             plot_settings = self._get_plot_settings(selected_columns)
-            
-            # Get data
-            data = self.data_loader.data
+            plot_settings['is_multi_file_mode'] = self.is_multi_file_mode
             
             # Create and show plot window
             plot_window = IndependentPlotWindow(self)
@@ -983,7 +1093,7 @@ class MainWindow(QMainWindow):
             'reference_column': self.reference_combo.currentText(),
             'reference2_column': self.reference2_combo.currentText(),
             'time_window': self.time_window_spin.value(),
-            'custom_ylabel': self.ylabel_input.text().strip() if hasattr(self, 'ylabel_input') else "Water Concentration (ppm)"
+            'custom_ylabel': self.get_current_ylabel()
         }
         
         # Add selected columns if provided
@@ -991,6 +1101,14 @@ class MainWindow(QMainWindow):
             settings['selected_columns'] = selected_columns
             
         return settings
+        
+    def get_current_ylabel(self):
+        """获取当前的纵坐标标签"""
+        if self.ylabel_combo.currentText() == "自定义":
+            return self.ylabel_input.text().strip() if self.ylabel_input.text().strip() else "Water Concentration (ppm)"
+        else:
+            # 返回预设的标签值
+            return self.ylabel_combo.currentData() or self.ylabel_combo.currentText()
         
     def export_data(self):
         """Export data to Excel"""

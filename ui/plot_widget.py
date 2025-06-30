@@ -106,56 +106,81 @@ class IndependentPlotWindow(QMainWindow):
             if enable_calibration:
                 calibrated_data = self._calculate_calibration(plot_df, plot_settings)
             
+            # 检查是否为多文件模式
+            is_multi_file_mode = plot_settings.get('is_multi_file_mode', False)
+            
             # Plot data
             colors = plt.cm.tab10.colors
             calib_colors = ['#ff7f0e', '#d62728', '#9467bd', '#8c564b', 
                           '#e377c2', '#bcbd22', '#17becf', '#f0027f']
             
-            for i, col in enumerate(selected_columns):
-                if col not in plot_df.columns:
-                    continue
+            if is_multi_file_mode:
+                # 多文件模式：绘制组合数据
+                if 'combined_value' in plot_df.columns and 'relative_time' in plot_df.columns:
+                    valid_data = plot_df[['relative_time', 'combined_value']].dropna()
+                    if not valid_data.empty:
+                        # 如果有source列，显示不同段的颜色
+                        if 'source' in plot_df.columns:
+                            sources = plot_df['source'].unique()
+                            for i, source in enumerate(sources):
+                                source_data = plot_df[plot_df['source'] == source][['relative_time', 'combined_value']].dropna()
+                                if not source_data.empty:
+                                    color_idx = i % len(colors)
+                                    ax.plot(source_data['relative_time'], source_data['combined_value'],
+                                          '-', color=colors[color_idx], label=source,
+                                          linewidth=2.0)
+                        else:
+                            # 没有source列，绘制整体数据
+                            ax.plot(valid_data['relative_time'], valid_data['combined_value'],
+                                  '-', color=colors[0], label="组合数据",
+                                  linewidth=2.0)
+            else:
+                # 单文件模式：原有逻辑
+                for i, col in enumerate(selected_columns):
+                    if col not in plot_df.columns:
+                        continue
+                        
+                    color_idx = i % len(colors)
                     
-                color_idx = i % len(colors)
-                
-                # Check if this is a moisture column with calibration
-                is_moisture = self._is_moisture_column(col, plot_settings)
-                
-                if is_moisture and enable_calibration:
-                    # Plot original data if requested
-                    if show_original:
+                    # Check if this is a moisture column with calibration
+                    is_moisture = self._is_moisture_column(col, plot_settings)
+                    
+                    if is_moisture and enable_calibration:
+                        # Plot original data if requested
+                        if show_original:
+                            valid_data = plot_df[['relative_time', col]].dropna()
+                            if not valid_data.empty:
+                                ax.plot(valid_data['relative_time'], valid_data[col],
+                                      '-', color=colors[color_idx],
+                                      label=f"{col} (original)",
+                                      linewidth=2.0, alpha=0.7)
+                        
+                        # Plot calibrated data
+                        calib_col = f"{col}_calib"
+                        if calib_col in calibrated_data:
+                            times = calibrated_data[calib_col]['times']
+                            values = calibrated_data[calib_col]['values']
+                            
+                            calib_color = calib_colors[color_idx % len(calib_colors)]
+                            ax.plot(times, values, '--', color=calib_color,
+                                  label=f"{col} (calibrated)",
+                                  linewidth=2.5, marker='o', markersize=2,
+                                  markevery=len(times)//20)
+                            
+                            # Add error range if requested
+                            if show_error:
+                                upper_bound = values + error_value
+                                lower_bound = values - error_value
+                                ax.fill_between(times, lower_bound, upper_bound,
+                                              color=calib_color, alpha=0.2,
+                                              label=f"Error Range (±{error_value:.1f} ppm)")
+                    else:
+                        # Plot regular data
                         valid_data = plot_df[['relative_time', col]].dropna()
                         if not valid_data.empty:
                             ax.plot(valid_data['relative_time'], valid_data[col],
-                                  '-', color=colors[color_idx],
-                                  label=f"{col} (original)",
-                                  linewidth=2.0, alpha=0.7)
-                    
-                    # Plot calibrated data
-                    calib_col = f"{col}_calib"
-                    if calib_col in calibrated_data:
-                        times = calibrated_data[calib_col]['times']
-                        values = calibrated_data[calib_col]['values']
-                        
-                        calib_color = calib_colors[color_idx % len(calib_colors)]
-                        ax.plot(times, values, '--', color=calib_color,
-                              label=f"{col} (calibrated)",
-                              linewidth=2.5, marker='o', markersize=2,
-                              markevery=len(times)//20)
-                        
-                        # Add error range if requested
-                        if show_error:
-                            upper_bound = values + error_value
-                            lower_bound = values - error_value
-                            ax.fill_between(times, lower_bound, upper_bound,
-                                          color=calib_color, alpha=0.2,
-                                          label=f"Error Range (±{error_value:.1f} ppm)")
-                else:
-                    # Plot regular data
-                    valid_data = plot_df[['relative_time', col]].dropna()
-                    if not valid_data.empty:
-                        ax.plot(valid_data['relative_time'], valid_data[col],
-                              '-', color=colors[color_idx], label=col,
-                              linewidth=2.0)
+                                  '-', color=colors[color_idx], label=col,
+                                  linewidth=2.0)
             
             # Set labels and title - academic paper standards
             ax.set_xlabel("Time (hours)", fontsize=11, fontweight='normal')
