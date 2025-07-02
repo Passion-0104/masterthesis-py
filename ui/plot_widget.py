@@ -1595,12 +1595,28 @@ class IndependentPlotWindow(QMainWindow):
             # 获取斜率计算设置
             interval_minutes = plot_settings.get('slope_interval', 15.0)
             time_column = plot_settings.get('time_column', 'time')
+            calculation_method = plot_settings.get('slope_method', 'moving_regression')  # 默认使用滑动线性拟合
+            window_minutes = plot_settings.get('slope_window', None)  # None = 自动设置为2倍间隔
+            smoothing_enabled = plot_settings.get('slope_smoothing', False)
+            smooth_window = plot_settings.get('slope_smooth_window', 15)
+            smooth_order = plot_settings.get('slope_smooth_order', 2)
             
-            print(f"Debug: Starting interval-based slope calculation - interval: {interval_minutes} minutes")
+            print(f"Debug: Starting slope calculation - method: {calculation_method}, interval: {interval_minutes} minutes")
+            if window_minutes:
+                print(f"Debug: Window size: {window_minutes} minutes")
+            else:
+                print(f"Debug: Window size: auto (2 × {interval_minutes} = {2 * interval_minutes} minutes)")
+            
+            if smoothing_enabled:
+                print(f"Debug: Savitzky-Golay smoothing enabled (window={smooth_window}, order={smooth_order})")
+            else:
+                print(f"Debug: Savitzky-Golay smoothing disabled")
             
             # 计算斜率
             slope_results = self.slope_calculator.calculate_slopes(
-                plot_df, selected_columns, time_column, interval_minutes
+                plot_df, selected_columns, time_column, interval_minutes,
+                method=calculation_method, window_minutes=window_minutes,
+                smoothing=smoothing_enabled, smooth_window=smooth_window, smooth_order=smooth_order
             )
             
             if not slope_results:
@@ -1683,7 +1699,7 @@ class IndependentPlotWindow(QMainWindow):
             
             # Clean title for academic papers
             interval_min = slope_results[list(slope_results.keys())[0]]['interval_minutes']
-            ax.set_title(f"Slope vs Time ({interval_min}-minute intervals)", 
+            ax.set_title(f"Slope vs Time ({interval_min}-min intervals)", 
                         fontsize=14, fontfamily='serif', pad=20)
             
             # Academic style legend
@@ -1752,8 +1768,20 @@ class IndependentPlotWindow(QMainWindow):
                 stats_text += f"最大斜率: {col_stats['max_slope']:.6f} ppm/小时\n"
                 stats_text += f"最小斜率: {col_stats['min_slope']:.6f} ppm/小时\n"
                 stats_text += f"中位数斜率: {col_stats['median_slope']:.6f} ppm/小时\n"
-
-                stats_text += f"数据点数: {col_stats['num_points']}\n\n"
+                stats_text += f"数据点数: {col_stats['num_points']}\n"
+                
+                # Add smoothing information if available
+                if col in slope_results:
+                    slope_data = slope_results[col]
+                    if slope_data.get('smoothed', False):
+                        noise_reduction = slope_data.get('noise_reduction_percent', 0)
+                        smooth_method = slope_data.get('smooth_method', 'unknown')
+                        smooth_window = slope_data.get('smooth_window', 'unknown')
+                        smooth_order = slope_data.get('smooth_order', 'unknown')
+                        stats_text += f"平滑处理: {smooth_method} (窗口={smooth_window}, 阶数={smooth_order})\n"
+                        stats_text += f"噪声降低: {noise_reduction:.1f}%\n"
+                
+                stats_text += "\n"
             
             # 文本显示区域
             text_edit = QTextEdit()
@@ -1867,8 +1895,26 @@ class IndependentPlotWindow(QMainWindow):
             with open(details_path, 'w', encoding='utf-8') as f:
                 f.write("=== Slope Calculation Details ===\n\n")
                 f.write(f"Calculation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Time Interval: {plot_settings.get('slope_interval', 15.0)} minutes\n")
-                f.write(f"Calculation Method: Interval-based slope calculation\n\n")
+                interval_min = plot_settings.get('slope_interval', 15.0)
+                method = plot_settings.get('slope_method', 'moving_regression')
+                window_min = plot_settings.get('slope_window', None)
+                smoothing_enabled = plot_settings.get('slope_smoothing', False)
+                smooth_window = plot_settings.get('slope_smooth_window', 15)
+                smooth_order = plot_settings.get('slope_smooth_order', 2)
+                
+                f.write(f"Calculation Method: {method}\n")
+                f.write(f"Time Interval: {interval_min} minutes\n")
+                if method == 'moving_regression':
+                    if window_min:
+                        f.write(f"Sliding Window: {window_min} minutes\n")
+                    else:
+                        f.write(f"Sliding Window: {2 * interval_min} minutes (auto)\n")
+                
+                f.write(f"Savitzky-Golay Smoothing: {'Enabled' if smoothing_enabled else 'Disabled'}\n")
+                if smoothing_enabled:
+                    f.write(f"Smoothing Window: {smooth_window}\n")
+                    f.write(f"Polynomial Order: {smooth_order}\n")
+                f.write("\n")
                 
                 f.write("=== Statistical Information ===\n\n")
                 for col, col_stats in stats.items():

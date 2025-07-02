@@ -6,6 +6,7 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.signal import savgol_filter
 from typing import Dict, List, Optional, Tuple
 
 
@@ -18,26 +19,192 @@ class SlopeCalculator:
     def calculate_slopes(self, data: pd.DataFrame, 
                         selected_columns: List[str],
                         time_column: str,
-                        interval_minutes: float) -> Dict:
+                        interval_minutes: float,
+                        method: str = 'moving_regression',
+                        window_minutes: float = None,
+                        smoothing: bool = False,
+                        smooth_window: int = 15,
+                        smooth_order: int = 2) -> Dict:
         """
-        Calculate slopes for specified columns using X-minute intervals
+        Calculate slopes for specified columns using different methods
         
         Args:
             data: DataFrame containing the data
             selected_columns: List of columns to calculate slopes for
             time_column: Name of the time column
-            interval_minutes: Time interval in minutes (calculate slope every X minutes using X-minute intervals)
+            interval_minutes: Time interval in minutes (calculate slope every X minutes)
+            method: Calculation method ('moving_regression' or 'interval_based')
+            window_minutes: Window size for moving regression (default: 2 * interval_minutes)
+            smoothing: Enable Savitzky-Golay post-processing smoothing
+            smooth_window: Window length for Savitzky-Golay filter (must be odd)
+            smooth_order: Polynomial order for Savitzky-Golay filter
             
         Returns:
             Dictionary containing slope calculation results
         """
         if data.empty or not selected_columns:
             return {}
+        
+        # Set default window size for moving regression
+        if window_minutes is None:
+            window_minutes = 2 * interval_minutes
+        
+        # Choose calculation method
+        if method == 'moving_regression':
+            results = self._calculate_slopes_moving_regression(
+                data, selected_columns, time_column, interval_minutes, window_minutes)
+        elif method == 'interval_based':
+            results = self._calculate_slopes_interval_based(
+                data, selected_columns, time_column, interval_minutes)
+        else:
+            raise ValueError(f"Unsupported method: {method}. Use 'moving_regression' or 'interval_based'")
+        
+        # Apply Savitzky-Golay smoothing if enabled
+        if smoothing and results:
+            results = self._apply_savgol_smoothing(results, smooth_window, smooth_order)
+        
+        return results
+    
+    def _calculate_slopes_moving_regression(self, data: pd.DataFrame, 
+                                          selected_columns: List[str],
+                                          time_column: str,
+                                          interval_minutes: float,
+                                          window_minutes: float) -> Dict:
+        """
+        使用滑动线性拟合方法计算斜率
+        
+        Args:
+            data: DataFrame containing the data
+            selected_columns: List of columns to calculate slopes for
+            time_column: Name of the time column
+            interval_minutes: Time interval in minutes (calculate slope every X minutes)
+            window_minutes: Window size for moving regression in minutes
             
+        Returns:
+            Dictionary containing slope calculation results
+        """
+        results = {}
+        
+        # Convert time intervals to hours
+        interval_hours = interval_minutes / 60.0
+        window_hours = window_minutes / 60.0
+        half_window = window_hours / 2.0
+        
+        print(f"Debug: Using moving linear regression method")
+        print(f"Debug: Calculation interval: {interval_minutes} minutes ({interval_hours:.3f} hours)")
+        print(f"Debug: Sliding window: {window_minutes} minutes ({window_hours:.3f} hours)")
+        
+        # 准备时间数据
+        if 'relative_time' in data.columns:
+            time_data = data['relative_time'].copy()
+        else:
+            # 创建相对时间
+            if time_column in data.columns:
+                time_data = pd.to_datetime(data[time_column], errors='coerce')
+                time_data = (time_data - time_data.min()).dt.total_seconds() / 3600
+            else:
+                time_data = pd.Series(range(len(data)), dtype=float)
+        
+        # 获取时间范围
+        min_time = time_data.min()
+        max_time = time_data.max()
+        
+        if pd.isna(min_time) or pd.isna(max_time):
+            return {}
+        
+        # 生成计算时间点：从窗口的一半开始，到数据结束减去窗口的一半
+        start_time = min_time + half_window
+        end_time = max_time - half_window
+        
+        if start_time >= end_time:
+            print(f"Debug: Data range too small for moving regression analysis")
+            return {}
+        
+        calc_times = np.arange(start_time, end_time + 0.001, interval_hours)
+        
+        print(f"Debug: Valid calculation time range: {start_time:.3f}h to {end_time:.3f}h")
+        print(f"Debug: Number of calculation time points: {len(calc_times)}")
+        
+        # 对每个选定的列计算斜率
+        for col in selected_columns:
+            if col not in data.columns:
+                continue
+                
+            # 获取有效数据
+            valid_mask = pd.notna(data[col]) & pd.notna(time_data)
+            if valid_mask.sum() < 3:  # 至少需要3个点才能进行线性拟合
+                print(f"Debug: {col} insufficient data points, skipping")
+                continue
+                
+            col_data = data[col][valid_mask]
+            col_time = time_data[valid_mask]
+            
+            slopes = []
+            slope_times = []
+            r_squared_values = []  # 存储拟合优度
+            n_points_used = []  # 存储每次拟合使用的点数
+            
+            for calc_time in calc_times:
+                # 定义滑动窗口
+                window_start = calc_time - half_window
+                window_end = calc_time + half_window
+                
+                # 选择窗口内的数据点
+                window_mask = (col_time >= window_start) & (col_time <= window_end)
+                window_times = col_time[window_mask]
+                window_values = col_data[window_mask]
+                
+                if len(window_times) < 3:  # 至少需要3个点进行线性拟合
+                    continue
+                
+                try:
+                    # 执行线性拟合 y = ax + b
+                    slope, intercept, r_value, p_value, std_err = stats.linregress(window_times, window_values)
+                    
+                    # 检查拟合质量
+                    if np.isfinite(slope) and np.isfinite(r_value):
+                        slopes.append(slope)
+                        slope_times.append(calc_time)
+                        r_squared_values.append(r_value ** 2)
+                        n_points_used.append(len(window_times))
+                    
+                except Exception as e:
+                    print(f"Debug: Linear fitting failed at {calc_time:.3f}h: {e}")
+                    continue
+            
+            if slopes:
+                print(f"Debug: {col} calculated {len(slopes)} slope points")
+                print(f"Debug: Average R² = {np.mean(r_squared_values):.4f}")
+                print(f"Debug: Average points used = {np.mean(n_points_used):.1f}")
+                
+                results[col] = {
+                    'times': np.array(slope_times),
+                    'slopes': np.array(slopes),
+                    'r_squared': np.array(r_squared_values),
+                    'n_points': np.array(n_points_used),
+                    'original_column': col,
+                    'interval_minutes': interval_minutes,
+                    'window_minutes': window_minutes,
+                    'units': 'ppm/hour',
+                    'calculation_method': 'moving_regression'
+                }
+        
+        return results
+    
+    def _calculate_slopes_interval_based(self, data: pd.DataFrame, 
+                                       selected_columns: List[str],
+                                       time_column: str,
+                                       interval_minutes: float) -> Dict:
+        """
+        使用原有的基于间隔的方法计算斜率
+        """
         results = {}
         
         # Convert time interval to hours
         interval_hours = interval_minutes / 60.0
+        
+        print(f"Debug: Using interval-based method")
+        print(f"Debug: Calculation interval: {interval_minutes} minutes ({interval_hours:.3f} hours)")
         
         # 准备时间数据
         if 'relative_time' in data.columns:
@@ -60,9 +227,8 @@ class SlopeCalculator:
         # 生成计算时间点：从0开始，每隔interval_hours一个点，直到数据结束
         calc_times = np.arange(min_time, max_time + 0.001, interval_hours)
         
-        print(f"Debug: 计算时间点范围: {min_time:.3f}h 到 {max_time:.3f}h")
-        print(f"Debug: 计算间隔: {interval_hours:.3f}h ({interval_minutes}分钟)")
-        print(f"Debug: 计算时间点: {[f'{t:.3f}h({t*60:.0f}min)' for t in calc_times[:10]]}...")
+        print(f"Debug: Calculation time range: {min_time:.3f}h to {max_time:.3f}h")
+        print(f"Debug: Number of calculation time points: {len(calc_times)}")
         
         # 对每个选定的列计算斜率
         for col in selected_columns:
@@ -83,7 +249,7 @@ class SlopeCalculator:
                 interp_func = interp1d(col_time, col_data, kind='linear', 
                                      bounds_error=False, fill_value='extrapolate')
             except Exception as e:
-                print(f"Debug: 插值函数创建失败 for {col}: {e}")
+                print(f"Debug: Interpolation function creation failed for {col}: {e}")
                 continue
             
             slopes = []
@@ -130,11 +296,11 @@ class SlopeCalculator:
                         })
                         
                 except Exception as e:
-                    print(f"Debug: 计算斜率失败 at {calc_time:.3f}h: {e}")
+                    print(f"Debug: Slope calculation failed at {calc_time:.3f}h: {e}")
                     continue
             
             if slopes:
-                print(f"Debug: {col} 计算了 {len(slopes)} 个斜率点")
+                print(f"Debug: {col} calculated {len(slopes)} slope points")
                 results[col] = {
                     'times': np.array(slope_times),
                     'slopes': np.array(slopes),
@@ -251,3 +417,62 @@ class SlopeCalculator:
             smoothed_results[col] = smoothed_data
         
         return smoothed_results 
+    
+    def _apply_savgol_smoothing(self, slope_results: Dict, window_length: int, polyorder: int) -> Dict:
+        """
+        Apply Savitzky-Golay smoothing to slope results
+        
+        Args:
+            slope_results: Original slope calculation results
+            window_length: Length of the filter window (must be odd)
+            polyorder: Order of the polynomial used for fitting
+            
+        Returns:
+            Smoothed slope results
+        """
+        smoothed_results = {}
+        
+        # Ensure window_length is odd
+        if window_length % 2 == 0:
+            window_length += 1
+        
+        print(f"Debug: Applying Savitzky-Golay smoothing (window={window_length}, order={polyorder})")
+        
+        for col, data in slope_results.items():
+            slopes = data['slopes']
+            
+            if len(slopes) < window_length:
+                # Not enough points for smoothing, keep original
+                print(f"Debug: {col} - insufficient points for smoothing ({len(slopes)} < {window_length}), keeping original")
+                smoothed_results[col] = data.copy()
+                continue
+            
+            try:
+                # Apply Savitzky-Golay filter
+                smoothed_slopes = savgol_filter(slopes, window_length, polyorder)
+                
+                # Calculate smoothing statistics
+                original_std = np.std(slopes)
+                smoothed_std = np.std(smoothed_slopes)
+                noise_reduction = (1 - smoothed_std / original_std) * 100 if original_std > 0 else 0
+                
+                print(f"Debug: {col} - smoothed {len(slopes)} points, noise reduction: {noise_reduction:.1f}%")
+                
+                # Copy original data and replace slopes
+                smoothed_data = data.copy()
+                smoothed_data['slopes'] = smoothed_slopes
+                smoothed_data['original_slopes'] = slopes  # Keep original for comparison
+                smoothed_data['smoothed'] = True
+                smoothed_data['smooth_method'] = 'savgol'
+                smoothed_data['smooth_window'] = window_length
+                smoothed_data['smooth_order'] = polyorder
+                smoothed_data['noise_reduction_percent'] = noise_reduction
+                
+                smoothed_results[col] = smoothed_data
+                
+            except Exception as e:
+                print(f"Debug: Savitzky-Golay smoothing failed for {col}: {e}")
+                # Keep original if smoothing fails
+                smoothed_results[col] = data.copy()
+        
+        return smoothed_results

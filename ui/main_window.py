@@ -647,7 +647,13 @@ class MainWindow(QMainWindow):
         self.toggle_calibration_controls()
         
         # Initialize slope settings
+        # Default slope calculation settings
         self.slope_interval = 15.0  # Default 15 minutes interval
+        self.slope_method = 'moving_regression'  # Default to moving regression
+        self.slope_window = None  # Auto-adjust window (2x interval)
+        self.slope_smoothing = False  # Savitzky-Golay smoothing disabled by default
+        self.slope_smooth_window = 15  # Default smoothing window length
+        self.slope_smooth_order = 2  # Default polynomial order
         
     def set_controls_enabled(self, enabled):
         """Enable or disable controls based on data availability"""
@@ -901,9 +907,16 @@ class MainWindow(QMainWindow):
         
     def open_slope_settings(self):
         """Open slope settings dialog"""
-        dialog = SlopeSettingsDialog(self, self.slope_interval)
+        dialog = SlopeSettingsDialog(self, self.slope_interval, self.slope_method, self.slope_window,
+                                   self.slope_smoothing, self.slope_smooth_window, self.slope_smooth_order)
         if dialog.exec_() == QDialog.Accepted:
-            self.slope_interval = dialog.get_settings()
+            settings = dialog.get_settings()
+            self.slope_interval = settings['interval']
+            self.slope_method = settings['method']
+            self.slope_window = settings['window']
+            self.slope_smoothing = settings['smoothing']
+            self.slope_smooth_window = settings['smooth_window']
+            self.slope_smooth_order = settings['smooth_order']
         
     def import_parameters(self):
         """Import calibration parameters"""
@@ -1090,6 +1103,11 @@ class MainWindow(QMainWindow):
             'enable_20min_interval_diff': self.enable_20min_interval_diff_cb.isChecked(),
             'enable_slope_calc': self.enable_slope_calc_cb.isChecked(),
             'slope_interval': self.slope_interval,
+            'slope_method': self.slope_method,
+            'slope_window': self.slope_window,
+            'slope_smoothing': self.slope_smoothing,
+            'slope_smooth_window': self.slope_smooth_window,
+            'slope_smooth_order': self.slope_smooth_order,
             'reference_column': self.reference_combo.currentText(),
             'reference2_column': self.reference2_combo.currentText(),
             'time_window': self.time_window_spin.value(),
@@ -1237,11 +1255,17 @@ class MainWindow(QMainWindow):
 class SlopeSettingsDialog(QDialog):
     """Slope calculation settings dialog"""
     
-    def __init__(self, parent=None, current_interval=15.0):
+    def __init__(self, parent=None, current_interval=15.0, current_method='moving_regression', current_window=None, 
+                 current_smoothing=False, current_smooth_window=15, current_smooth_order=2):
         super().__init__(parent)
         self.setWindowTitle("Slope Calculation Settings")
-        self.setFixedSize(350, 180)
+        self.setFixedSize(480, 480)
         self.current_interval = current_interval
+        self.current_method = current_method
+        self.current_window = current_window
+        self.current_smoothing = current_smoothing
+        self.current_smooth_window = current_smooth_window
+        self.current_smooth_order = current_smooth_order
         self.setup_ui()
         
     def setup_ui(self):
@@ -1255,13 +1279,34 @@ class SlopeSettingsDialog(QDialog):
         title.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(title)
         
+        # Method selection
+        method_group = QGroupBox("Calculation Method")
+        method_group.setFont(QFont("Arial", 12))
+        method_layout = QVBoxLayout(method_group)
+        
+        self.method_moving = QRadioButton("Moving Linear Regression")
+        self.method_moving.setFont(QFont("Arial", 11))
+        self.method_moving.setChecked(self.current_method == 'moving_regression')
+        self.method_moving.toggled.connect(self._on_method_changed)
+        method_layout.addWidget(self.method_moving)
+        
+        self.method_interval = QRadioButton("Interval-based Method")
+        self.method_interval.setFont(QFont("Arial", 11))
+        self.method_interval.setChecked(self.current_method == 'interval_based')
+        method_layout.addWidget(self.method_interval)
+        
+        layout.addWidget(method_group)
+        
         # Settings grid
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setSpacing(15)
+        grid.setColumnStretch(0, 1)  # Label column
+        grid.setColumnStretch(1, 1)  # Input column
         
         # Time interval setting
-        interval_label = QLabel("Time Interval (minutes):")
+        interval_label = QLabel("Calculation Interval (minutes):")
         interval_label.setFont(QFont("Arial", 11))
+        interval_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         grid.addWidget(interval_label, 0, 0)
         
         self.interval_spin = QDoubleSpinBox()
@@ -1270,19 +1315,106 @@ class SlopeSettingsDialog(QDialog):
         self.interval_spin.setValue(self.current_interval)
         self.interval_spin.setDecimals(1)
         self.interval_spin.setSuffix(" min")
-        self.interval_spin.setMinimumHeight(30)
+        self.interval_spin.setMinimumHeight(35)
+        self.interval_spin.setMinimumWidth(80)
         grid.addWidget(self.interval_spin, 0, 1)
+        
+        # Window size setting (for moving regression)
+        self.window_label = QLabel("Sliding Window Size (minutes):")
+        self.window_label.setFont(QFont("Arial", 11))
+        self.window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        grid.addWidget(self.window_label, 1, 0)
+        
+        self.window_spin = QDoubleSpinBox()
+        self.window_spin.setFont(QFont("Arial", 11))
+        self.window_spin.setRange(2.0, 240.0)
+        current_window = self.current_window if self.current_window else (2 * self.current_interval)
+        self.window_spin.setValue(current_window)
+        self.window_spin.setDecimals(1)
+        self.window_spin.setSuffix(" min")
+        self.window_spin.setMinimumHeight(35)
+        self.window_spin.setMinimumWidth(80)
+        grid.addWidget(self.window_spin, 1, 1)
+        
+        # Auto-adjust checkbox
+        self.auto_window_cb = QCheckBox("Auto-adjust window size (2× interval)")
+        self.auto_window_cb.setFont(QFont("Arial", 11))
+        self.auto_window_cb.setChecked(self.current_window is None)
+        self.auto_window_cb.toggled.connect(self._on_auto_window_changed)
+        grid.addWidget(self.auto_window_cb, 2, 0, 1, 2)
         
         layout.addLayout(grid)
         
-        # Description
-        desc = QLabel("Calculate slope every X minutes using X-minute intervals.\n"
-                     "Example: 15 min interval calculates slope between\n"
-                     "consecutive 15-minute data points.")
-        desc.setFont(QFont("Arial", 9))
-        desc.setStyleSheet("color: #666666;")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+        # Savitzky-Golay Smoothing section
+        smoothing_group = QGroupBox("Post-processing Smoothing")
+        smoothing_group.setFont(QFont("Arial", 12))
+        smoothing_layout = QVBoxLayout(smoothing_group)
+        
+        self.enable_smoothing_cb = QCheckBox("Enable Savitzky-Golay Smoothing")
+        self.enable_smoothing_cb.setFont(QFont("Arial", 11))
+        self.enable_smoothing_cb.setChecked(self.current_smoothing)
+        self.enable_smoothing_cb.toggled.connect(self._on_smoothing_toggled)
+        smoothing_layout.addWidget(self.enable_smoothing_cb)
+        
+        # Smoothing parameters
+        smooth_grid = QGridLayout()
+        smooth_grid.setSpacing(15)
+        smooth_grid.setColumnStretch(0, 1)  # Label column gets 1 part
+        smooth_grid.setColumnStretch(1, 1)  # Input column gets 1 part
+        
+        # Window length
+        self.smooth_window_label = QLabel("Window Length:")
+        self.smooth_window_label.setFont(QFont("Arial", 11))
+        self.smooth_window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        smooth_grid.addWidget(self.smooth_window_label, 0, 0)
+        
+        self.smooth_window_spin = QSpinBox()
+        self.smooth_window_spin.setFont(QFont("Arial", 11))
+        self.smooth_window_spin.setRange(5, 51)  # Must be odd and >= polyorder+2
+        self.smooth_window_spin.setValue(self.current_smooth_window)
+        self.smooth_window_spin.setSingleStep(2)  # Only odd numbers
+        self.smooth_window_spin.setMinimumHeight(35)
+        self.smooth_window_spin.setMinimumWidth(80)
+        smooth_grid.addWidget(self.smooth_window_spin, 0, 1)
+        
+        # Polynomial order
+        self.smooth_order_label = QLabel("Polynomial Order:")
+        self.smooth_order_label.setFont(QFont("Arial", 11))
+        self.smooth_order_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        smooth_grid.addWidget(self.smooth_order_label, 1, 0)
+        
+        self.smooth_order_spin = QSpinBox()
+        self.smooth_order_spin.setFont(QFont("Arial", 11))
+        self.smooth_order_spin.setRange(1, 5)
+        self.smooth_order_spin.setValue(self.current_smooth_order)
+        self.smooth_order_spin.setMinimumHeight(35)
+        self.smooth_order_spin.setMinimumWidth(80)
+        smooth_grid.addWidget(self.smooth_order_spin, 1, 1)
+        
+        smoothing_layout.addLayout(smooth_grid)
+        
+        # Smoothing description
+        smooth_desc = QLabel("Removes noise while preserving trends. Window must be odd and > polynomial order.\n"
+                            "Recommended: Window 15-25, Order 2-3")
+        smooth_desc.setFont(QFont("Arial", 9))
+        smooth_desc.setStyleSheet("color: #666666; margin-top: 5px;")
+        smooth_desc.setWordWrap(True)
+        smoothing_layout.addWidget(smooth_desc)
+        
+        layout.addWidget(smoothing_group)
+        
+        # Method descriptions
+        self.desc_label = QLabel()
+        self.desc_label.setFont(QFont("Arial", 9))
+        self.desc_label.setStyleSheet("color: #666666;")
+        self.desc_label.setWordWrap(True)
+        self.desc_label.setMinimumHeight(80)
+        layout.addWidget(self.desc_label)
+        
+        # Update descriptions based on current method
+        self._on_method_changed()
+        self._on_auto_window_changed()
+        self._on_smoothing_toggled()
         
         layout.addStretch()
         
@@ -1292,7 +1424,95 @@ class SlopeSettingsDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
         
+    def _on_method_changed(self):
+        """Handle method selection change"""
+        if self.method_moving.isChecked():
+            # Moving regression method
+            self.window_label.setVisible(True)
+            self.window_spin.setVisible(True)
+            self.auto_window_cb.setVisible(True)
+            
+            self.desc_label.setText(
+                "Moving Linear Regression Method:\n"
+                "• At each time point, performs linear fitting on all data points within the surrounding window\n"
+                "• Uses least squares method to obtain the slope of the best-fit line\n"
+                "• More stable results, effectively handles noisy data\n"
+                "• Recommended window size: 2-4 times the calculation interval"
+            )
+        else:
+            # Interval-based method
+            self.window_label.setVisible(False)
+            self.window_spin.setVisible(False)
+            self.auto_window_cb.setVisible(False)
+            
+            self.desc_label.setText(
+                "Interval-based Method:\n"
+                "• Calculates slope every X minutes using two adjacent data points\n"
+                "• Slope = (next point value - current point value) / time interval\n"
+                "• Fast calculation but sensitive to noise\n"
+                "• Example: 15-minute interval calculates slope between consecutive 15-minute data points"
+            )
+    
+    def _on_auto_window_changed(self):
+        """Handle auto-adjust window checkbox change"""
+        if self.auto_window_cb.isChecked():
+            self.window_spin.setEnabled(False)
+            # Update window to 2x interval
+            self.window_spin.setValue(2 * self.interval_spin.value())
+            # Connect interval change to auto-update window
+            self.interval_spin.valueChanged.connect(self._update_auto_window)
+        else:
+            self.window_spin.setEnabled(True)
+            # Disconnect auto-update
+            try:
+                self.interval_spin.valueChanged.disconnect(self._update_auto_window)
+            except:
+                pass  # May not be connected
+    
+    def _update_auto_window(self):
+        """Update window size automatically when interval changes"""
+        if self.auto_window_cb.isChecked():
+            self.window_spin.setValue(2 * self.interval_spin.value())
+    
+    def _on_smoothing_toggled(self):
+        """Handle smoothing checkbox toggle"""
+        enabled = self.enable_smoothing_cb.isChecked()
+        self.smooth_window_label.setEnabled(enabled)
+        self.smooth_window_spin.setEnabled(enabled)
+        self.smooth_order_label.setEnabled(enabled)
+        self.smooth_order_spin.setEnabled(enabled)
+        
+        # Ensure window length is odd and larger than polynomial order
+        if enabled:
+            self._validate_smoothing_params()
+            self.smooth_window_spin.valueChanged.connect(self._validate_smoothing_params)
+            self.smooth_order_spin.valueChanged.connect(self._validate_smoothing_params)
+    
+    def _validate_smoothing_params(self):
+        """Validate Savitzky-Golay parameters"""
+        window = self.smooth_window_spin.value()
+        order = self.smooth_order_spin.value()
+        
+        # Ensure window is odd
+        if window % 2 == 0:
+            self.smooth_window_spin.setValue(window + 1)
+            window = window + 1
+        
+        # Ensure window > order
+        if window <= order:
+            self.smooth_window_spin.setValue(order + 2 if (order + 2) % 2 == 1 else order + 3)
+        
     def get_settings(self):
         """Get the configured settings"""
-        return self.interval_spin.value()
+        method = 'moving_regression' if self.method_moving.isChecked() else 'interval_based'
+        window_size = None if self.auto_window_cb.isChecked() else self.window_spin.value()
+        
+        return {
+            'interval': self.interval_spin.value(),
+            'method': method,
+            'window': window_size,
+            'smoothing': self.enable_smoothing_cb.isChecked(),
+            'smooth_window': self.smooth_window_spin.value(),
+            'smooth_order': self.smooth_order_spin.value()
+        }
  
