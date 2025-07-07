@@ -648,9 +648,12 @@ class MainWindow(QMainWindow):
         
         # Initialize slope settings
         # Default slope calculation settings
-        self.slope_interval = 15.0  # Default 15 minutes interval
-        self.slope_method = 'moving_regression'  # Default to moving regression
-        self.slope_window = None  # Auto-adjust window (2x interval)
+        self.slope_interval = 15.0  # Default 15 minutes interval (for legacy methods)
+        self.slope_method = 'interval_regression'  # Default to interval regression
+        self.slope_window = None  # Auto-adjust window (2x interval, for legacy methods)
+        self.slope_left_window = 15.0  # Default left window 15 minutes
+        self.slope_right_window = 15.0  # Default right window 15 minutes
+        self.slope_calculation_interval_seconds = 30.0  # Default 30 seconds interval for interval regression
         self.slope_smoothing = False  # Savitzky-Golay smoothing disabled by default
         self.slope_smooth_window = 15  # Default smoothing window length
         self.slope_smooth_order = 2  # Default polynomial order
@@ -908,15 +911,24 @@ class MainWindow(QMainWindow):
     def open_slope_settings(self):
         """Open slope settings dialog"""
         dialog = SlopeSettingsDialog(self, self.slope_interval, self.slope_method, self.slope_window,
+                                   self.slope_left_window, self.slope_right_window, getattr(self, 'slope_calculation_interval_seconds', 30.0),
                                    self.slope_smoothing, self.slope_smooth_window, self.slope_smooth_order)
         if dialog.exec_() == QDialog.Accepted:
             settings = dialog.get_settings()
-            self.slope_interval = settings['interval']
+            print(f"Debug: Slope settings received: {settings}")
+            
+            if settings['interval'] is not None:
+                self.slope_interval = settings['interval']
+            self.slope_calculation_interval_seconds = settings['calculation_interval_seconds']
             self.slope_method = settings['method']
             self.slope_window = settings['window']
+            self.slope_left_window = settings['left_window']
+            self.slope_right_window = settings['right_window']
             self.slope_smoothing = settings['smoothing']
             self.slope_smooth_window = settings['smooth_window']
             self.slope_smooth_order = settings['smooth_order']
+            
+            print(f"Debug: Updated slope_calculation_interval_seconds to: {self.slope_calculation_interval_seconds}")
         
     def import_parameters(self):
         """Import calibration parameters"""
@@ -1105,6 +1117,9 @@ class MainWindow(QMainWindow):
             'slope_interval': self.slope_interval,
             'slope_method': self.slope_method,
             'slope_window': self.slope_window,
+            'slope_left_window': self.slope_left_window,
+            'slope_right_window': self.slope_right_window,
+            'slope_calculation_interval_seconds': self.slope_calculation_interval_seconds,
             'slope_smoothing': self.slope_smoothing,
             'slope_smooth_window': self.slope_smooth_window,
             'slope_smooth_order': self.slope_smooth_order,
@@ -1255,14 +1270,18 @@ class MainWindow(QMainWindow):
 class SlopeSettingsDialog(QDialog):
     """Slope calculation settings dialog"""
     
-    def __init__(self, parent=None, current_interval=15.0, current_method='moving_regression', current_window=None, 
+    def __init__(self, parent=None, current_interval=15.0, current_method='interval_regression', current_window=None,
+                 current_left_window=15.0, current_right_window=15.0, current_calculation_interval_seconds=30.0,
                  current_smoothing=False, current_smooth_window=15, current_smooth_order=2):
         super().__init__(parent)
         self.setWindowTitle("Slope Calculation Settings")
-        self.setFixedSize(480, 480)
+        self.setFixedSize(520, 650)
         self.current_interval = current_interval
         self.current_method = current_method
         self.current_window = current_window
+        self.current_left_window = current_left_window
+        self.current_right_window = current_right_window
+        self.current_calculation_interval_seconds = current_calculation_interval_seconds
         self.current_smoothing = current_smoothing
         self.current_smooth_window = current_smooth_window
         self.current_smooth_order = current_smooth_order
@@ -1284,13 +1303,25 @@ class SlopeSettingsDialog(QDialog):
         method_group.setFont(QFont("Arial", 12))
         method_layout = QVBoxLayout(method_group)
         
-        self.method_moving = QRadioButton("Moving Linear Regression")
+        self.method_interval_regression = QRadioButton("Interval Regression ⭐ Recommended")
+        self.method_interval_regression.setFont(QFont("Arial", 11))
+        self.method_interval_regression.setChecked(self.current_method == 'interval_regression')
+        self.method_interval_regression.toggled.connect(self._on_method_changed)
+        method_layout.addWidget(self.method_interval_regression)
+        
+        self.method_continuous = QRadioButton("Continuous Linear Regression (Legacy)")
+        self.method_continuous.setFont(QFont("Arial", 11))
+        self.method_continuous.setChecked(self.current_method == 'continuous_regression')
+        self.method_continuous.toggled.connect(self._on_method_changed)
+        method_layout.addWidget(self.method_continuous)
+        
+        self.method_moving = QRadioButton("Moving Linear Regression (Legacy)")
         self.method_moving.setFont(QFont("Arial", 11))
         self.method_moving.setChecked(self.current_method == 'moving_regression')
         self.method_moving.toggled.connect(self._on_method_changed)
         method_layout.addWidget(self.method_moving)
         
-        self.method_interval = QRadioButton("Interval-based Method")
+        self.method_interval = QRadioButton("Interval-based Method (Legacy)")
         self.method_interval.setFont(QFont("Arial", 11))
         self.method_interval.setChecked(self.current_method == 'interval_based')
         method_layout.addWidget(self.method_interval)
@@ -1303,11 +1334,27 @@ class SlopeSettingsDialog(QDialog):
         grid.setColumnStretch(0, 1)  # Label column
         grid.setColumnStretch(1, 1)  # Input column
         
-        # Time interval setting
-        interval_label = QLabel("Calculation Interval (minutes):")
-        interval_label.setFont(QFont("Arial", 11))
-        interval_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        grid.addWidget(interval_label, 0, 0)
+        # Calculation interval setting (for interval regression)
+        self.interval_regression_label = QLabel("Calculation Interval (seconds):")
+        self.interval_regression_label.setFont(QFont("Arial", 11))
+        self.interval_regression_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        grid.addWidget(self.interval_regression_label, 0, 0)
+        
+        self.interval_regression_spin = QDoubleSpinBox()
+        self.interval_regression_spin.setFont(QFont("Arial", 11))
+        self.interval_regression_spin.setRange(5.0, 300.0)
+        self.interval_regression_spin.setValue(self.current_calculation_interval_seconds)
+        self.interval_regression_spin.setDecimals(1)
+        self.interval_regression_spin.setSuffix(" sec")
+        self.interval_regression_spin.setMinimumHeight(35)
+        self.interval_regression_spin.setMinimumWidth(80)
+        grid.addWidget(self.interval_regression_spin, 0, 1)
+        
+        # Time interval setting (for legacy methods)
+        self.interval_label = QLabel("Calculation Interval (minutes):")
+        self.interval_label.setFont(QFont("Arial", 11))
+        self.interval_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        grid.addWidget(self.interval_label, 1, 0)
         
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setFont(QFont("Arial", 11))
@@ -1317,13 +1364,13 @@ class SlopeSettingsDialog(QDialog):
         self.interval_spin.setSuffix(" min")
         self.interval_spin.setMinimumHeight(35)
         self.interval_spin.setMinimumWidth(80)
-        grid.addWidget(self.interval_spin, 0, 1)
+        grid.addWidget(self.interval_spin, 1, 1)
         
         # Window size setting (for moving regression)
         self.window_label = QLabel("Sliding Window Size (minutes):")
         self.window_label.setFont(QFont("Arial", 11))
         self.window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        grid.addWidget(self.window_label, 1, 0)
+        grid.addWidget(self.window_label, 2, 0)
         
         self.window_spin = QDoubleSpinBox()
         self.window_spin.setFont(QFont("Arial", 11))
@@ -1334,16 +1381,124 @@ class SlopeSettingsDialog(QDialog):
         self.window_spin.setSuffix(" min")
         self.window_spin.setMinimumHeight(35)
         self.window_spin.setMinimumWidth(80)
-        grid.addWidget(self.window_spin, 1, 1)
+        grid.addWidget(self.window_spin, 2, 1)
         
         # Auto-adjust checkbox
         self.auto_window_cb = QCheckBox("Auto-adjust window size (2× interval)")
         self.auto_window_cb.setFont(QFont("Arial", 11))
         self.auto_window_cb.setChecked(self.current_window is None)
         self.auto_window_cb.toggled.connect(self._on_auto_window_changed)
-        grid.addWidget(self.auto_window_cb, 2, 0, 1, 2)
+        grid.addWidget(self.auto_window_cb, 3, 0, 1, 2)
         
         layout.addLayout(grid)
+        
+        # Interval regression parameters
+        self.interval_regression_group = QGroupBox("Interval Regression Parameters")
+        self.interval_regression_group.setFont(QFont("Arial", 12))
+        interval_regression_layout = QVBoxLayout(self.interval_regression_group)
+        
+        interval_regression_grid = QGridLayout()
+        interval_regression_grid.setSpacing(15)
+        interval_regression_grid.setColumnStretch(0, 1)  # Label column
+        interval_regression_grid.setColumnStretch(1, 1)  # Input column
+        
+        # Left window setting for interval regression
+        interval_left_window_label = QLabel("Left Window (minutes):")
+        interval_left_window_label.setFont(QFont("Arial", 11))
+        interval_left_window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        interval_regression_grid.addWidget(interval_left_window_label, 0, 0)
+        
+        self.interval_left_window_spin = QDoubleSpinBox()
+        self.interval_left_window_spin.setFont(QFont("Arial", 11))
+        self.interval_left_window_spin.setRange(0.1, 240.0)
+        self.interval_left_window_spin.setValue(self.current_left_window)
+        self.interval_left_window_spin.setDecimals(1)
+        self.interval_left_window_spin.setSuffix(" min")
+        self.interval_left_window_spin.setMinimumHeight(35)
+        self.interval_left_window_spin.setMinimumWidth(80)
+        interval_regression_grid.addWidget(self.interval_left_window_spin, 0, 1)
+        
+        # Right window setting for interval regression
+        interval_right_window_label = QLabel("Right Window (minutes):")
+        interval_right_window_label.setFont(QFont("Arial", 11))
+        interval_right_window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        interval_regression_grid.addWidget(interval_right_window_label, 1, 0)
+        
+        self.interval_right_window_spin = QDoubleSpinBox()
+        self.interval_right_window_spin.setFont(QFont("Arial", 11))
+        self.interval_right_window_spin.setRange(0.1, 240.0)
+        self.interval_right_window_spin.setValue(self.current_right_window)
+        self.interval_right_window_spin.setDecimals(1)
+        self.interval_right_window_spin.setSuffix(" min")
+        self.interval_right_window_spin.setMinimumHeight(35)
+        self.interval_right_window_spin.setMinimumWidth(80)
+        interval_regression_grid.addWidget(self.interval_right_window_spin, 1, 1)
+        
+        interval_regression_layout.addLayout(interval_regression_grid)
+        
+        # Interval regression description
+        interval_regression_desc = QLabel("Calculates slope at regular intervals using surrounding data.\n"
+                                         "Left window: data before each calculation point, Right window: data after each point.")
+        interval_regression_desc.setFont(QFont("Arial", 9))
+        interval_regression_desc.setStyleSheet("color: #666666; margin-top: 5px;")
+        interval_regression_desc.setWordWrap(True)
+        interval_regression_layout.addWidget(interval_regression_desc)
+        
+        layout.addWidget(self.interval_regression_group)
+        
+        # Continuous regression parameters
+        self.continuous_group = QGroupBox("Continuous Regression Parameters")
+        self.continuous_group.setFont(QFont("Arial", 12))
+        continuous_layout = QVBoxLayout(self.continuous_group)
+        
+        continuous_grid = QGridLayout()
+        continuous_grid.setSpacing(15)
+        continuous_grid.setColumnStretch(0, 1)  # Label column
+        continuous_grid.setColumnStretch(1, 1)  # Input column
+        
+        # Left window setting
+        left_window_label = QLabel("Left Window (minutes):")
+        left_window_label.setFont(QFont("Arial", 11))
+        left_window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        continuous_grid.addWidget(left_window_label, 0, 0)
+        
+        self.left_window_spin = QDoubleSpinBox()
+        self.left_window_spin.setFont(QFont("Arial", 11))
+        self.left_window_spin.setRange(0.1, 240.0)
+        self.left_window_spin.setValue(self.current_left_window)
+        self.left_window_spin.setDecimals(1)
+        self.left_window_spin.setSuffix(" min")
+        self.left_window_spin.setMinimumHeight(35)
+        self.left_window_spin.setMinimumWidth(80)
+        continuous_grid.addWidget(self.left_window_spin, 0, 1)
+        
+        # Right window setting
+        right_window_label = QLabel("Right Window (minutes):")
+        right_window_label.setFont(QFont("Arial", 11))
+        right_window_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        continuous_grid.addWidget(right_window_label, 1, 0)
+        
+        self.right_window_spin = QDoubleSpinBox()
+        self.right_window_spin.setFont(QFont("Arial", 11))
+        self.right_window_spin.setRange(0.1, 240.0)
+        self.right_window_spin.setValue(self.current_right_window)
+        self.right_window_spin.setDecimals(1)
+        self.right_window_spin.setSuffix(" min")
+        self.right_window_spin.setMinimumHeight(35)
+        self.right_window_spin.setMinimumWidth(80)
+        continuous_grid.addWidget(self.right_window_spin, 1, 1)
+        
+        continuous_layout.addLayout(continuous_grid)
+        
+        # Continuous regression description
+        continuous_desc = QLabel("Calculates slope for every data point using surrounding data.\n"
+                                "Left window: data before each point, Right window: data after each point.")
+        continuous_desc.setFont(QFont("Arial", 9))
+        continuous_desc.setStyleSheet("color: #666666; margin-top: 5px;")
+        continuous_desc.setWordWrap(True)
+        continuous_layout.addWidget(continuous_desc)
+        
+        layout.addWidget(self.continuous_group)
         
         # Savitzky-Golay Smoothing section
         smoothing_group = QGroupBox("Post-processing Smoothing")
@@ -1426,27 +1581,79 @@ class SlopeSettingsDialog(QDialog):
         
     def _on_method_changed(self):
         """Handle method selection change"""
-        if self.method_moving.isChecked():
+        if self.method_interval_regression.isChecked():
+            # Interval regression method
+            self.interval_regression_group.setVisible(True)
+            self.continuous_group.setVisible(False)
+            self.window_label.setVisible(False)
+            self.window_spin.setVisible(False)
+            self.auto_window_cb.setVisible(False)
+            self.interval_regression_label.setVisible(True)
+            self.interval_regression_spin.setVisible(True)
+            self.interval_label.setVisible(False)
+            self.interval_spin.setVisible(False)
+            
+            self.desc_label.setText(
+                "Interval Regression Method (Recommended):\n"
+                "• Calculates slope at regular time intervals (e.g., every 30 seconds)\n"
+                "• Each calculation uses surrounding data within left and right windows\n"
+                "• Balanced approach: good data density without overwhelming output\n"
+                "• Recommended: 30-60 second intervals with 10-20 minute windows"
+            )
+            
+        elif self.method_continuous.isChecked():
+            # Continuous regression method
+            self.interval_regression_group.setVisible(False)
+            self.continuous_group.setVisible(True)
+            self.window_label.setVisible(False)
+            self.window_spin.setVisible(False)
+            self.auto_window_cb.setVisible(False)
+            self.interval_regression_label.setVisible(False)
+            self.interval_regression_spin.setVisible(False)
+            self.interval_label.setVisible(False)
+            self.interval_spin.setVisible(False)
+            
+            self.desc_label.setText(
+                "Continuous Linear Regression Method (Legacy):\n"
+                "• Calculates slope for EVERY data point (continuous calculation)\n"
+                "• Each point uses surrounding data within left and right windows\n"
+                "• Maximum data density but may produce too many points\n"
+                "• Use when you need maximum resolution"
+            )
+            
+        elif self.method_moving.isChecked():
             # Moving regression method
+            self.interval_regression_group.setVisible(False)
+            self.continuous_group.setVisible(False)
             self.window_label.setVisible(True)
             self.window_spin.setVisible(True)
             self.auto_window_cb.setVisible(True)
+            self.interval_regression_label.setVisible(False)
+            self.interval_regression_spin.setVisible(False)
+            self.interval_label.setVisible(True)
+            self.interval_spin.setVisible(True)
             
             self.desc_label.setText(
-                "Moving Linear Regression Method:\n"
-                "• At each time point, performs linear fitting on all data points within the surrounding window\n"
+                "Moving Linear Regression Method (Legacy):\n"
+                "• Calculates slope at specified intervals using surrounding data window\n"
                 "• Uses least squares method to obtain the slope of the best-fit line\n"
                 "• More stable results, effectively handles noisy data\n"
                 "• Recommended window size: 2-4 times the calculation interval"
             )
         else:
             # Interval-based method
+            self.interval_regression_group.setVisible(False)
+            self.continuous_group.setVisible(False)
             self.window_label.setVisible(False)
             self.window_spin.setVisible(False)
             self.auto_window_cb.setVisible(False)
+            self.interval_regression_label.setVisible(False)
+            self.interval_regression_spin.setVisible(False)
+            self.interval_label.setVisible(True)
+            self.interval_spin.setVisible(True)
             
             self.desc_label.setText(
-                "Interval-based Method:\n"
+                "Interval-based Method (Legacy):\n"
                 "• Calculates slope every X minutes using two adjacent data points\n"
                 "• Slope = (next point value - current point value) / time interval\n"
                 "• Fast calculation but sensitive to noise\n"
@@ -1504,13 +1711,24 @@ class SlopeSettingsDialog(QDialog):
         
     def get_settings(self):
         """Get the configured settings"""
-        method = 'moving_regression' if self.method_moving.isChecked() else 'interval_based'
-        window_size = None if self.auto_window_cb.isChecked() else self.window_spin.value()
+        if self.method_interval_regression.isChecked():
+            method = 'interval_regression'
+        elif self.method_continuous.isChecked():
+            method = 'continuous_regression'
+        elif self.method_moving.isChecked():
+            method = 'moving_regression'
+        else:
+            method = 'interval_based'
+        
+        window_size = None if hasattr(self, 'auto_window_cb') and self.auto_window_cb.isChecked() else (self.window_spin.value() if hasattr(self, 'window_spin') else None)
         
         return {
-            'interval': self.interval_spin.value(),
+            'interval': self.interval_spin.value() if hasattr(self, 'interval_spin') and self.interval_spin.isVisible() else None,
+            'calculation_interval_seconds': self.interval_regression_spin.value() if hasattr(self, 'interval_regression_spin') else 30.0,
             'method': method,
             'window': window_size,
+            'left_window': self.interval_left_window_spin.value() if hasattr(self, 'interval_left_window_spin') and self.interval_regression_group.isVisible() else self.left_window_spin.value(),
+            'right_window': self.interval_right_window_spin.value() if hasattr(self, 'interval_right_window_spin') and self.interval_regression_group.isVisible() else self.right_window_spin.value(),
             'smoothing': self.enable_smoothing_cb.isChecked(),
             'smooth_window': self.smooth_window_spin.value(),
             'smooth_order': self.smooth_order_spin.value()

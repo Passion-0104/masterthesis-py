@@ -19,45 +19,62 @@ class SlopeCalculator:
     def calculate_slopes(self, data: pd.DataFrame, 
                         selected_columns: List[str],
                         time_column: str,
-                        interval_minutes: float,
-                        method: str = 'moving_regression',
+                        interval_minutes: float = None,
+                        method: str = 'interval_regression',
                         window_minutes: float = None,
+                        left_window_minutes: float = None,
+                        right_window_minutes: float = None,
+                        calculation_interval_seconds: float = 30.0,
                         smoothing: bool = False,
                         smooth_window: int = 15,
                         smooth_order: int = 2) -> Dict:
         """
-        Calculate slopes for specified columns using different methods
+        计算斜率
         
         Args:
-            data: DataFrame containing the data
-            selected_columns: List of columns to calculate slopes for
-            time_column: Name of the time column
-            interval_minutes: Time interval in minutes (calculate slope every X minutes)
-            method: Calculation method ('moving_regression' or 'interval_based')
-            window_minutes: Window size for moving regression (default: 2 * interval_minutes)
-            smoothing: Enable Savitzky-Golay post-processing smoothing
-            smooth_window: Window length for Savitzky-Golay filter (must be odd)
-            smooth_order: Polynomial order for Savitzky-Golay filter
+            data: 包含数据的DataFrame
+            selected_columns: 要计算斜率的列名列表
+            time_column: 时间列名
+            interval_minutes: 计算间隔（分钟）- 用于interval_based方法
+            method: 计算方法 ('interval_regression', 'continuous_regression', 'moving_regression', 'interval_based')
+            window_minutes: 滑动窗口大小（分钟）- 用于moving_regression方法
+            left_window_minutes: 左窗口大小（分钟）- 用于continuous_regression方法
+            right_window_minutes: 右窗口大小（分钟）- 用于continuous_regression方法
+            calculation_interval_seconds: 计算间隔（秒）- 用于interval_regression方法
+            smoothing: 是否应用Savitzky-Golay平滑
+            smooth_window: 平滑窗口大小
+            smooth_order: 平滑多项式阶数
             
         Returns:
-            Dictionary containing slope calculation results
+            包含斜率数据的字典
         """
         if data.empty or not selected_columns:
             return {}
         
-        # Set default window size for moving regression
-        if window_minutes is None:
-            window_minutes = 2 * interval_minutes
-        
         # Choose calculation method
-        if method == 'moving_regression':
+        if method == 'interval_regression':
+            results = self._calculate_slopes_interval_regression(
+                data, selected_columns, time_column, 
+                calculation_interval_seconds, left_window_minutes, right_window_minutes
+            )
+        elif method == 'continuous_regression':
+            results = self._calculate_slopes_continuous_regression(
+                data, selected_columns, time_column, left_window_minutes, right_window_minutes
+            )
+        elif method == 'moving_regression':
+            if window_minutes is None:
+                window_minutes = interval_minutes * 2 if interval_minutes else 30.0
             results = self._calculate_slopes_moving_regression(
-                data, selected_columns, time_column, interval_minutes, window_minutes)
+                data, selected_columns, time_column, interval_minutes, window_minutes
+            )
         elif method == 'interval_based':
+            if interval_minutes is None:
+                interval_minutes = 30.0
             results = self._calculate_slopes_interval_based(
-                data, selected_columns, time_column, interval_minutes)
+                data, selected_columns, time_column, interval_minutes
+            )
         else:
-            raise ValueError(f"Unsupported method: {method}. Use 'moving_regression' or 'interval_based'")
+            raise ValueError(f"Unknown method: {method}")
         
         # Apply Savitzky-Golay smoothing if enabled
         if smoothing and results:
@@ -189,6 +206,306 @@ class SlopeCalculator:
                     'calculation_method': 'moving_regression'
                 }
         
+        return results
+    
+    def _calculate_slopes_interval_regression(self, data: pd.DataFrame, 
+                                            selected_columns: List[str],
+                                            time_column: str,
+                                            calculation_interval_seconds: float,
+                                            left_window_minutes: float = None,
+                                            right_window_minutes: float = None) -> Dict:
+        """
+        使用间隔回归方法计算斜率：每隔指定秒数计算一次，使用左右窗口进行线性拟合
+        
+        Args:
+            data: 包含数据的DataFrame
+            selected_columns: 要计算斜率的列名列表
+            time_column: 时间列名
+            calculation_interval_seconds: 计算间隔（秒）
+            left_window_minutes: 左窗口大小（分钟）
+            right_window_minutes: 右窗口大小（分钟）
+            
+        Returns:
+            包含斜率数据的字典
+        """
+        if data.empty or not selected_columns:
+            return {}
+        
+        # Set default window sizes if not provided
+        if left_window_minutes is None:
+            left_window_minutes = 15.0  # Default 15 minutes left
+        if right_window_minutes is None:
+            right_window_minutes = 15.0  # Default 15 minutes right
+        
+        # Convert calculation interval to hours
+        calculation_interval_hours = calculation_interval_seconds / 3600.0
+        
+        print(f"Debug: Starting slope calculation - method: interval_regression")
+        print(f"Debug: Calculation interval: {calculation_interval_seconds} seconds ({calculation_interval_hours:.4f} hours)")
+        print(f"Debug: Left window: {left_window_minutes} minutes, Right window: {right_window_minutes} minutes")
+        
+        # Prepare time data
+        if 'relative_time' in data.columns:
+            time_data = data['relative_time'].copy()
+        else:
+            # Create relative time
+            if time_column in data.columns:
+                time_data = pd.to_datetime(data[time_column], errors='coerce')
+                time_data = (time_data - time_data.min()).dt.total_seconds() / 3600
+            else:
+                time_data = pd.Series(range(len(data)), dtype=float)
+        
+        # Get time range
+        min_time = time_data.min()
+        max_time = time_data.max()
+        
+        if pd.isna(min_time) or pd.isna(max_time):
+            return {}
+        
+        # Generate calculation time points: every calculation_interval_seconds
+        calc_times = np.arange(min_time, max_time + 0.001, calculation_interval_hours)
+        
+        print(f"Debug: Data time range: {min_time:.3f}h to {max_time:.3f}h")
+        print(f"Debug: Number of calculation time points: {len(calc_times)}")
+        
+        results = {}
+        
+        # Calculate slopes for each selected column
+        for col in selected_columns:
+            if col not in data.columns:
+                continue
+                
+            # Get valid data
+            valid_mask = pd.notna(data[col]) & pd.notna(time_data)
+            if valid_mask.sum() < 3:  # Need at least 3 points for regression
+                continue
+                
+            col_data = data[col][valid_mask]
+            col_time = time_data[valid_mask]
+            
+            slopes = []
+            slope_times = []
+            r_squared_values = []
+            n_points_used = []
+            valid_calculations = 0
+            total_points = len(calc_times)
+            
+            for idx, calc_time in enumerate(calc_times):
+                # Define window boundaries
+                left_boundary = calc_time - (left_window_minutes / 60.0)
+                right_boundary = calc_time + (right_window_minutes / 60.0)
+                
+                # 从原始数据中选择窗口内的数据点（重新检查NaN）
+                window_mask = (time_data >= left_boundary) & (time_data <= right_boundary)
+                window_times = time_data[window_mask]
+                window_values = data[col][window_mask]
+                
+                # 在窗口内重新过滤NaN值
+                valid_in_window = pd.notna(window_times) & pd.notna(window_values)
+                window_times_clean = window_times[valid_in_window]
+                window_values_clean = window_values[valid_in_window]
+                
+                # 设置最小数据点要求
+                min_required_points = max(10, int(len(calc_times) * 0.05))  # 至少10个点，或总点数的5%
+                
+                # 如果双窗口数据不足，尝试只使用左窗口
+                if len(window_times_clean) < min_required_points:
+                    # 对于数据末尾的点，如果双窗口数据不足，尝试只用左窗口
+                    left_mask = (time_data >= left_boundary) & (time_data <= calc_time)
+                    left_times = time_data[left_mask]
+                    left_values = data[col][left_mask]
+                    
+                    # 在左窗口内重新过滤NaN值
+                    valid_in_left = pd.notna(left_times) & pd.notna(left_values)
+                    left_times_clean = left_times[valid_in_left]
+                    left_values_clean = left_values[valid_in_left]
+                    
+                    if len(left_times_clean) >= min_required_points:
+                        window_times_clean = left_times_clean
+                        window_values_clean = left_values_clean
+                        print(f"Debug: Using left window only for calc_time {calc_time:.3f}h ({len(left_times_clean)} points)")
+                    else:
+                        print(f"Debug: Skipping calc_time {calc_time:.3f}h - insufficient valid data ({len(left_times_clean)} < {min_required_points})")
+                        continue  # 数据不足，跳过该点
+                
+                if len(window_times_clean) < min_required_points:
+                    print(f"Debug: Skipping calc_time {calc_time:.3f}h - insufficient valid data ({len(window_times_clean)} < {min_required_points})")
+                    continue
+                try:
+                    # Perform linear regression y = ax + b with cleaned data
+                    slope, intercept, r_value, p_value, std_err = stats.linregress(window_times_clean, window_values_clean)
+                    
+                    # 额外验证：检查结果是否合理
+                    if (np.isfinite(slope) and np.isfinite(r_value) and 
+                        np.isfinite(intercept) and abs(slope) < 1000):  # 防止异常大的斜率值
+                        slopes.append(slope)
+                        slope_times.append(calc_time)
+                        r_squared_values.append(r_value ** 2)
+                        n_points_used.append(len(window_times_clean))
+                        valid_calculations += 1
+                        
+                        # 如果R²值很低，给出警告
+                        if r_value ** 2 < 0.1:
+                            print(f"Debug: Low R² ({r_value**2:.3f}) at calc_time {calc_time:.3f}h with {len(window_times_clean)} points")
+                    else:
+                        print(f"Debug: Invalid regression result at calc_time {calc_time:.3f}h (slope={slope:.3f}, r_value={r_value:.3f})")
+                        
+                except Exception as e:
+                    print(f"Debug: Regression failed at calc_time {calc_time:.3f}h: {str(e)}")
+                    continue
+            
+            if slopes:
+                print(f"Debug: {col} calculated {len(slopes)} slope points from {total_points} calculation points ({valid_calculations/total_points*100:.1f}% coverage)")
+                print(f"Debug: Average R² = {np.mean(r_squared_values):.4f}")
+                print(f"Debug: Average points used = {np.mean(n_points_used):.1f}")
+                
+                results[col] = {
+                    'times': np.array(slope_times),
+                    'slopes': np.array(slopes),
+                    'r_squared': np.array(r_squared_values),
+                    'n_points': np.array(n_points_used),
+                    'original_column': col,
+                    'calculation_interval_seconds': calculation_interval_seconds,
+                    'left_window_minutes': left_window_minutes,
+                    'right_window_minutes': right_window_minutes,
+                    'total_window_minutes': left_window_minutes + right_window_minutes,
+                    'units': 'ppm/hour',
+                    'calculation_method': 'interval_regression'
+                }
+        
+        print(f"Debug: Interval regression completed, {len(results)} columns processed")
+        return results
+    
+    def _calculate_slopes_continuous_regression(self, data: pd.DataFrame, 
+                                              selected_columns: List[str],
+                                              time_column: str,
+                                              left_window_minutes: float,
+                                              right_window_minutes: float) -> Dict:
+        """
+        连续斜率计算：对每个数据点都计算斜率
+        
+        Args:
+            data: DataFrame containing the data
+            selected_columns: List of columns to calculate slopes for
+            time_column: Name of the time column
+            left_window_minutes: 向左取多少分钟的数据
+            right_window_minutes: 向右取多少分钟的数据
+            
+        Returns:
+            Dictionary containing slope calculation results
+        """
+        results = {}
+        
+        # Convert time intervals to hours
+        left_window_hours = left_window_minutes / 60.0
+        right_window_hours = right_window_minutes / 60.0
+        total_window_hours = left_window_hours + right_window_hours
+        
+        print(f"Debug: Using continuous linear regression method")
+        print(f"Debug: Left window: {left_window_minutes} minutes ({left_window_hours:.3f} hours)")
+        print(f"Debug: Right window: {right_window_minutes} minutes ({right_window_hours:.3f} hours)")
+        print(f"Debug: Total window: {left_window_minutes + right_window_minutes} minutes ({total_window_hours:.3f} hours)")
+        
+        # 准备时间数据
+        if 'relative_time' in data.columns:
+            time_data = data['relative_time'].copy()
+        else:
+            # 创建相对时间
+            if time_column in data.columns:
+                time_data = pd.to_datetime(data[time_column], errors='coerce')
+                time_data = (time_data - time_data.min()).dt.total_seconds() / 3600
+            else:
+                time_data = pd.Series(range(len(data)), dtype=float)
+        
+        # 获取时间范围
+        min_time = time_data.min()
+        max_time = time_data.max()
+        
+        if pd.isna(min_time) or pd.isna(max_time):
+            return {}
+        
+        print(f"Debug: Data time range: {min_time:.3f}h to {max_time:.3f}h")
+        
+        # 对每个选定的列计算斜率
+        for col in selected_columns:
+            if col not in data.columns:
+                continue
+                
+            # 获取有效数据
+            valid_mask = pd.notna(data[col]) & pd.notna(time_data)
+            if valid_mask.sum() < 3:  # 至少需要3个点才能进行线性拟合
+                print(f"Debug: {col} insufficient data points, skipping")
+                continue
+                
+            col_data = data[col][valid_mask]
+            col_time = time_data[valid_mask]
+            
+            slopes = []
+            slope_times = []
+            r_squared_values = []  # 存储拟合优度
+            n_points_used = []  # 存储每次拟合使用的点数
+            
+            # 对每个数据点都计算斜率
+            total_points = len(col_time)
+            valid_calculations = 0
+            
+            for i, calc_time in enumerate(col_time):
+                # 定义当前点的左右窗口
+                window_start = calc_time - left_window_hours
+                window_end = calc_time + right_window_hours
+                
+                # 从原始数据中选择窗口内的数据点（重新检查NaN）
+                window_mask = (time_data >= window_start) & (time_data <= window_end)
+                window_times = time_data[window_mask]
+                window_values = data[col][window_mask]
+                
+                # 在窗口内重新过滤NaN值
+                valid_in_window = pd.notna(window_times) & pd.notna(window_values)
+                window_times_clean = window_times[valid_in_window]
+                window_values_clean = window_values[valid_in_window]
+                
+                # 设置最小数据点要求（连续回归需要更少的点）
+                min_required_points = max(5, int(total_points * 0.01))  # 至少5个点，或总点数的1%
+                
+                if len(window_times_clean) < min_required_points:
+                    continue
+                
+                try:
+                    # 执行线性拟合 y = ax + b with cleaned data
+                    slope, intercept, r_value, p_value, std_err = stats.linregress(window_times_clean, window_values_clean)
+                    
+                    # 检查拟合质量和结果合理性
+                    if (np.isfinite(slope) and np.isfinite(r_value) and 
+                        np.isfinite(intercept) and abs(slope) < 1000):
+                        slopes.append(slope)
+                        slope_times.append(calc_time)
+                        r_squared_values.append(r_value ** 2)
+                        n_points_used.append(len(window_times_clean))
+                        valid_calculations += 1
+                    
+                except Exception as e:
+                    # 静默跳过拟合失败的点，避免过多输出
+                    continue
+            
+            if slopes:
+                print(f"Debug: {col} calculated {len(slopes)} slope points from {total_points} data points ({valid_calculations/total_points*100:.1f}% coverage)")
+                print(f"Debug: Average R² = {np.mean(r_squared_values):.4f}")
+                print(f"Debug: Average points used = {np.mean(n_points_used):.1f}")
+                
+                results[col] = {
+                    'times': np.array(slope_times),
+                    'slopes': np.array(slopes),
+                    'r_squared': np.array(r_squared_values),
+                    'n_points': np.array(n_points_used),
+                    'original_column': col,
+                    'left_window_minutes': left_window_minutes,
+                    'right_window_minutes': right_window_minutes,
+                    'total_window_minutes': left_window_minutes + right_window_minutes,
+                    'units': 'ppm/hour',
+                    'calculation_method': 'continuous_regression'
+                }
+        
+        print(f"Debug: Continuous regression completed, {len(results)} columns processed")
         return results
     
     def _calculate_slopes_interval_based(self, data: pd.DataFrame, 

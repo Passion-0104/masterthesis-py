@@ -1595,17 +1595,34 @@ class IndependentPlotWindow(QMainWindow):
             # 获取斜率计算设置
             interval_minutes = plot_settings.get('slope_interval', 15.0)
             time_column = plot_settings.get('time_column', 'time')
-            calculation_method = plot_settings.get('slope_method', 'moving_regression')  # 默认使用滑动线性拟合
+            calculation_method = plot_settings.get('slope_method', 'interval_regression')  # 默认使用间隔回归
             window_minutes = plot_settings.get('slope_window', None)  # None = 自动设置为2倍间隔
+            left_window_minutes = plot_settings.get('slope_left_window', 15.0)
+            right_window_minutes = plot_settings.get('slope_right_window', 15.0)
+            calculation_interval_seconds = plot_settings.get('slope_calculation_interval_seconds', 30.0)
             smoothing_enabled = plot_settings.get('slope_smoothing', False)
             smooth_window = plot_settings.get('slope_smooth_window', 15)
             smooth_order = plot_settings.get('slope_smooth_order', 2)
             
-            print(f"Debug: Starting slope calculation - method: {calculation_method}, interval: {interval_minutes} minutes")
-            if window_minutes:
-                print(f"Debug: Window size: {window_minutes} minutes")
+            print(f"Debug: Plot settings - calculation_interval_seconds: {calculation_interval_seconds}")
+            print(f"Debug: Plot settings - left_window_minutes: {left_window_minutes}")
+            print(f"Debug: Plot settings - right_window_minutes: {right_window_minutes}")
+            
+            print(f"Debug: Starting slope calculation - method: {calculation_method}")
+            
+            if calculation_method == 'interval_regression':
+                print(f"Debug: Calculation interval: {calculation_interval_seconds} seconds")
+                print(f"Debug: Left window: {left_window_minutes} minutes, Right window: {right_window_minutes} minutes")
+            elif calculation_method == 'continuous_regression':
+                print(f"Debug: Left window: {left_window_minutes} minutes, Right window: {right_window_minutes} minutes")
+            elif calculation_method == 'moving_regression':
+                print(f"Debug: Interval: {interval_minutes} minutes")
+                if window_minutes:
+                    print(f"Debug: Window size: {window_minutes} minutes")
+                else:
+                    print(f"Debug: Window size: auto (2 × {interval_minutes} = {2 * interval_minutes} minutes)")
             else:
-                print(f"Debug: Window size: auto (2 × {interval_minutes} = {2 * interval_minutes} minutes)")
+                print(f"Debug: Interval: {interval_minutes} minutes")
             
             if smoothing_enabled:
                 print(f"Debug: Savitzky-Golay smoothing enabled (window={smooth_window}, order={smooth_order})")
@@ -1614,9 +1631,16 @@ class IndependentPlotWindow(QMainWindow):
             
             # 计算斜率
             slope_results = self.slope_calculator.calculate_slopes(
-                plot_df, selected_columns, time_column, interval_minutes,
-                method=calculation_method, window_minutes=window_minutes,
-                smoothing=smoothing_enabled, smooth_window=smooth_window, smooth_order=smooth_order
+                plot_df, selected_columns, time_column, 
+                interval_minutes=interval_minutes,
+                method=calculation_method, 
+                window_minutes=window_minutes,
+                left_window_minutes=left_window_minutes,
+                right_window_minutes=right_window_minutes,
+                calculation_interval_seconds=calculation_interval_seconds,
+                smoothing=smoothing_enabled, 
+                smooth_window=smooth_window, 
+                smooth_order=smooth_order
             )
             
             if not slope_results:
@@ -1697,10 +1721,22 @@ class IndependentPlotWindow(QMainWindow):
             ax.set_xlabel("Time (hours)", fontsize=12, fontfamily='serif')
             ax.set_ylabel(f"Slope ({slope_results[list(slope_results.keys())[0]]['units']})", fontsize=12, fontfamily='serif')
             
-            # Clean title for academic papers
-            interval_min = slope_results[list(slope_results.keys())[0]]['interval_minutes']
-            ax.set_title(f"Slope vs Time ({interval_min}-min intervals)", 
-                        fontsize=14, fontfamily='serif', pad=20)
+            # Clean title for academic papers - handle different calculation methods
+            first_result = slope_results[list(slope_results.keys())[0]]
+            if 'interval_minutes' in first_result:
+                # For interval-based methods
+                interval_min = first_result['interval_minutes']
+                ax.set_title(f"Slope vs Time ({interval_min}-min intervals)", 
+                            fontsize=14, fontfamily='serif', pad=20)
+            elif 'calculation_interval_seconds' in first_result:
+                # For new interval regression method
+                interval_sec = first_result['calculation_interval_seconds']
+                ax.set_title(f"Slope vs Time ({interval_sec}-sec intervals)", 
+                            fontsize=14, fontfamily='serif', pad=20)
+            else:
+                # For continuous methods
+                ax.set_title(f"Slope vs Time", 
+                            fontsize=14, fontfamily='serif', pad=20)
             
             # Academic style legend
             legend = ax.legend(loc='best', frameon=False, fontsize=10)
@@ -1896,19 +1932,27 @@ class IndependentPlotWindow(QMainWindow):
                 f.write("=== Slope Calculation Details ===\n\n")
                 f.write(f"Calculation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 interval_min = plot_settings.get('slope_interval', 15.0)
-                method = plot_settings.get('slope_method', 'moving_regression')
+                method = plot_settings.get('slope_method', 'continuous_regression')
                 window_min = plot_settings.get('slope_window', None)
+                left_window_min = plot_settings.get('slope_left_window', 15.0)
+                right_window_min = plot_settings.get('slope_right_window', 15.0)
                 smoothing_enabled = plot_settings.get('slope_smoothing', False)
                 smooth_window = plot_settings.get('slope_smooth_window', 15)
                 smooth_order = plot_settings.get('slope_smooth_order', 2)
                 
                 f.write(f"Calculation Method: {method}\n")
-                f.write(f"Time Interval: {interval_min} minutes\n")
-                if method == 'moving_regression':
+                
+                if method == 'continuous_regression':
+                    f.write(f"Left Window: {left_window_min} minutes\n")
+                    f.write(f"Right Window: {right_window_min} minutes\n")
+                elif method == 'moving_regression':
+                    f.write(f"Time Interval: {interval_min} minutes\n")
                     if window_min:
                         f.write(f"Sliding Window: {window_min} minutes\n")
                     else:
                         f.write(f"Sliding Window: {2 * interval_min} minutes (auto)\n")
+                else:
+                    f.write(f"Time Interval: {interval_min} minutes\n")
                 
                 f.write(f"Savitzky-Golay Smoothing: {'Enabled' if smoothing_enabled else 'Disabled'}\n")
                 if smoothing_enabled:
