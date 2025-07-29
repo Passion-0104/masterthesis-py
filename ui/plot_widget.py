@@ -1028,7 +1028,103 @@ class IndependentPlotWindow(QMainWindow):
             plot_df = plot_df[(plot_df['relative_time'] >= start_time) & 
                             (plot_df['relative_time'] <= end_time)]
         
+        # 简洁的异常值处理 - 使用Z-score方法
+        plot_df = self._remove_outliers_zscore(plot_df, plot_settings)
+        
         return plot_df
+    
+    def _remove_outliers_zscore(self, plot_df, plot_settings, z_thresh=3.0):
+        """
+        使用Z-score方法移除异常值 - 基于用户提供的简洁方案
+        
+        Args:
+            plot_df: 需要处理的DataFrame
+            plot_settings: 画图设置字典  
+            z_thresh: Z-score阈值，默认3.0
+            
+        Returns:
+            处理后的DataFrame
+        """
+        if plot_df.empty:
+            return plot_df
+        
+        print(f"Debug: 开始Z-score异常值处理 (阈值: {z_thresh})")
+        
+        # 获取选中的列
+        selected_columns = plot_settings.get('selected_columns', [])
+        
+        # 如果没有选中列，处理所有数值列
+        if not selected_columns:
+            selected_columns = plot_df.select_dtypes(include=[np.number]).columns.tolist()
+            if 'relative_time' in selected_columns:
+                selected_columns.remove('relative_time')
+        
+        plot_df_cleaned = plot_df.copy()
+        total_outliers_removed = 0
+        
+        # 重点关注差值列
+        key_difference_columns = [
+            'the difference (Moisture_500-550 minus Moisture_reference (0.05bar))',
+            'the difference (Moisture_500-550 minus Moisture_reference (0.95bar))', 
+            'the difference (Moisture_290-500 minus Moisture_reference (0.95bar))'
+        ]
+        
+        for col in selected_columns:
+            if col not in plot_df_cleaned.columns:
+                continue
+                
+            col_data = plot_df_cleaned[col]
+            
+            # 只处理有足够数据的列
+            valid_data = col_data.dropna()
+            if len(valid_data) < 10:
+                continue
+            
+            # 应用Z-score异常值检测
+            mean_val = valid_data.mean()
+            std_val = valid_data.std()
+            
+            if std_val == 0:  # 避免除零错误
+                continue
+                
+            # 计算Z-scores
+            z_scores = (col_data - mean_val) / std_val
+            outlier_mask = z_scores.abs() > z_thresh
+            
+            outliers_count = outlier_mask.sum()
+            if outliers_count > 0:
+                # 使用mask方法将异常值设为NaN，然后删除这些行
+                plot_df_cleaned.loc[outlier_mask, col] = np.nan
+                total_outliers_removed += outliers_count
+                
+                is_key_column = col in key_difference_columns
+                symbol = "🔍" if is_key_column else "📊"
+                
+                print(f"{symbol} 列 '{col}' 移除了 {outliers_count} 个异常值")
+                print(f"    均值: {mean_val:.4f}, 标准差: {std_val:.4f}")
+        
+        # 删除包含NaN的行（异常值被标记为NaN的行）
+        before_dropna = len(plot_df_cleaned)
+        plot_df_cleaned = plot_df_cleaned.dropna()
+        after_dropna = len(plot_df_cleaned)
+        removed_rows = before_dropna - after_dropna
+        
+        if removed_rows > 0:
+            print(f"✅ 总共移除了 {removed_rows} 行异常数据")
+            print(f"   保留数据: {after_dropna}/{before_dropna} 行 ({after_dropna/before_dropna*100:.1f}%)")
+        else:
+            print("✅ 没有检测到需要移除的异常值")
+        
+        # 检查时间连续性
+        if 'relative_time' in plot_df_cleaned.columns and removed_rows > 0:
+            time_gaps = plot_df_cleaned['relative_time'].diff()
+            median_gap = time_gaps.median()
+            large_gaps = time_gaps[time_gaps > median_gap * 5]
+            
+            if len(large_gaps) > 0:
+                print(f"ℹ️  移除异常值后有 {len(large_gaps)} 个较大的时间间隔")
+        
+        return plot_df_cleaned
         
     def _is_moisture_column(self, col, plot_settings):
         """Check if a column is configured as a moisture column"""
